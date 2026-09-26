@@ -1,0 +1,28 @@
+# Simulated price feed (Part 8). Rates and vols are decimals: 0.05 means 5 %.
+
+# Seed for the ChaCha8 random stream. The same seed gives the same paths.
+seed = 42
+
+# Real time between engine ticks, in milliseconds. The engine (Part 11) reads this.
+tick_interval_ms = 250
+
+# Simulated seconds per real second. A 6.5 h session takes about 3 minutes.
+speed = 120
+
+# Annual drift mu of every underlying, as a decimal.
+drift = 0.0
+
+# Optional first session, as a New York date. The clock opens at 09:30 that day, or on
+# the next weekday if it falls on a weekend. Leave it out to start at the first session
+# after the last real close in the seed data.
+# start_date = "2026-09-28"
+
+[vol_process]
+# Ornstein-Uhlenbeck process in log vol, x = ln(sigma), pulled back to ln(seed vol).
+# Speed of mean reversion kappa, per trading year.
+mean_reversion = 5.0
+# Vol of vol xi, of log vol per square root of trading year.
+vol_of_vol = 0.9
+# Correlation between a symbol's price shock and its vol shock. Negative gives the
+# leverage effect: vol rises when the price falls.
+spot_vol_correlation = -0.7

@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use marketdata::{
-    AlphaVantageSource, Archive, DataMode, DataSource, HistoryLoader, MarketConfig, SystemClock,
-    calibrate,
+    AlphaVantageSource, Archive, DataMode, DataSource, HistoryLoader, MarketConfig,
+    SimulationConfig, SystemClock, calibrate,
 };
 use storage::StorageRoot;
 
@@ -64,4 +64,12 @@ async fn committed_fallback_files_calibrate() {
     }
     let market = seed.to_market_state(chrono::Utc::now()).unwrap();
     assert_eq!(market.symbols().count(), n);
+}
+
+#[test]
+fn committed_simulation_config_loads() {
+    let config = SimulationConfig::load(&repo_file("config/simulation.toml")).unwrap();
+    assert_eq!(config.seed, 42);
+    assert_eq!(config.tick_interval_ms, 250);
+    assert_eq!(config.start_date, None);
 }

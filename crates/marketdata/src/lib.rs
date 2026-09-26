@@ -15,6 +15,7 @@ mod error;
 mod fallback;
 mod loader;
 mod seed;
+mod simulation_config;
 mod source;
 
 pub use archive::{Archive, ArchiveHit, ArchiveRecord};
@@ -25,6 +26,7 @@ pub use error::{CalibrationError, MarketDataError};
 pub use fallback::{fallback_path, read_fallback, write_fallback};
 pub use loader::{DataSource, HistoryLoader, LoadedHistory};
 pub use seed::{SeedData, SymbolSeed};
+pub use simulation_config::{SimulationConfig, VolProcessConfig};
 pub use source::{
     AlphaVantageSource, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL, DailyBar, Download,
     HistorySource, RequestParams, parse_daily_body,

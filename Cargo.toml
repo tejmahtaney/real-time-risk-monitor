@@ -38,6 +38,10 @@ csv = "1"
 tokio = { version = "1", default-features = false, features = ["rt", "macros", "time", "sync"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
 toml = "1"
+nalgebra = { version = "0.35", default-features = false, features = ["std"] }
+rand = { version = "0.10", default-features = false }
+rand_chacha = "0.10"
+rand_distr = { version = "0.6", default-features = false }
 
 # Dev crates.
 approx = "0.5"
