@@ -3,10 +3,12 @@
 ## Open issues
 
 - Part 13: `PositionSpec` and its strike and expiry types already serialise, but there is no CSV writer yet. Part 5 only loads.
-- Part 8: `MarketState` has `insert` but no bulk update of spots. The simulator needs one.
 - Part 19: option multipliers are `f64` and honoured everywhere, but nothing adjusts strikes or multipliers for splits yet.
 - Part 19: the split detector (Part 7) only sees splits inside the 100-day fetched window and only matches ratios within 2 % of 1.5, 2, 3, 4, 5, 10, 20 or their inverses. A real one-day drop of about 33 % would be misread as a 3-for-2 split. It is logged as a warning, so it is visible.
-- Part 8: `SeedData::to_market_state` gives the starting `MarketState`, and `SeedData::correlation` is in `symbols` order for the correlated GBM.
+- Part 11: the engine should build its first `MarketState` with `SeedData::to_market_state`, take the pre-step prices from `GbmSimulator::current_tick`, and move the market on with `MarketTick::apply_to` after every `PriceFeed::step`.
+- Part 11: `SimClock::advance` returns a zero-length step while paused, so the engine may skip pricing on `from == to`. It also drops the real time it is given on an `Overnight` step, so the first tick after a close is not partial.
+- Part 19: the simulator has one drift μ for every symbol, and the vol shocks of different symbols correlate through the price shocks (corr of W_i, W_j is ρ² times the price correlation). Neither is calibrated from data.
+- Part 19: exchange holidays are ignored by `SimClock`, so a simulated session runs on days the real market is shut.
 - Part 13: `Archive` only saves and reads. It has no listing, usage or delete support, and the storage browser (Part 22) will need those.
 
 ## Log
@@ -92,3 +94,31 @@
 
   AAPL's near-zero correlation with SPY over these 60 days is unusually low. The maths was checked, so it is what the downloaded closes say, but it is worth a look. No splits were detected in any series (largest one-day move 15.7 %, TSLA).
 - Open issues: three added under Open issues above (Parts 8, 13 and 19).
+
+
+### Part 08 - Price simulator and market clock
+
+- Built: in `domain`, `SimClock` (implements `Clock`; 09:30 to 16:00 New York on weekdays, holidays ignored, `advance`, `set_speed`, `pause`, `resume`), `ClockStep` (`from`, `to`, `trading_years`, `calendar_years`, `session_date`, `kind`), `StepKind` (`Intraday`, `Close`, `Overnight`), `next_session_open_after`, `TRADING_SECONDS_PER_YEAR`, and `MarketState::update` (all-or-nothing bulk update of spot and vol, which closes the Part 8 open issue). In `marketdata`, `SimulationConfig` and `VolProcessConfig` (validated TOML), the `PriceFeed` trait with `MarketTick`, `Quote` and `FeedError`, and `GbmSimulator`: exact log-step correlated GBM, exact Ornstein-Uhlenbeck step for log vol with leverage correlation, Cholesky from `nalgebra` with shrinkage towards the identity in steps of 0.05, `ChaCha8Rng` from the config seed. `config/simulation.toml` with the prompt's defaults. Example `simulate`.
+- New dependencies (all in `marketdata`): `nalgebra` 0.35 (Cholesky and the shock matrix product; default features off, `std` on), `rand` 0.10 (`SeedableRng`, `RngExt`; default features off), `rand_chacha` 0.10 (`ChaCha8Rng`, as the prompt specifies), `rand_distr` 0.6 (`StandardNormal`, so there is no hand-written Box-Muller; default features off). `rand` 0.9 stays in the lockfile through `proptest`.
+- Tests: 293 in the workspace (up from 249). `domain` has 49 unit and 13 doc tests (was 31 and 10). `marketdata` has 70 unit tests (was 49) and 3 integration tests (was 1). The statistical tests use fixed seeds, so they are deterministic. Two mutations were tried by hand and each failed a test: dropping the −½σ² term, and dropping the independent part of the vol shock.
+- Choices the prompt left open. (1) The start override is `start_date`, a New York date, and not an instant. It opens at 09:30 that day, or on the next weekday. (2) Simulated time is rounded to whole milliseconds per step, so `to`, `trading_years` and `calendar_years` agree exactly. (3) A step with no trading time (overnight, paused) draws no random numbers, so a path does not depend on pauses. (4) A paused clock returns a zero-length `Intraday` step, also after a close. (5) An overnight step ignores the real time it is given. (6) `ClockStep.session_date` is the session the step belongs to, which for `Overnight` is the one being opened. (7) `SimClock::new` snaps a start outside a session to the next open, so the clock always starts in a session. (8) The tests check the −½σ²h correction at about 11 standard errors (σ = 0.5, h = 0.01), because with σ = 0.3 and h = 0.001 it is only 2 and a bug would pass a four-standard-error test. (9) A failed step leaves prices unchanged but a `NonFinite` failure has already drawn its random numbers, so the stream has moved on.
+- Example, `cargo run -p marketdata --example simulate -- 3` (seed 42, from the committed fallback data, first session Monday 2026-09-28):
+
+```
+2026-09-28
+symbol      open     close      high       low   change   vol range
+AAPL      341.07    339.21    342.55    336.47   -0.54%   27.9% - 29.2%
+MSFT      516.17    519.85    524.90    511.08   +0.71%   37.6% - 40.0%
+NVDA      225.07    230.28    232.09    222.25   +2.31%   35.0% - 39.9%
+SPY       771.35    772.50    773.92    767.28   +0.15%   10.9% - 12.1%
+TSLA      372.11    366.85    377.67    365.13   -1.41%   53.8% - 57.8%
+
+2026-09-30
+symbol      open     close      high       low   change   vol range
+AAPL      339.02    333.09    339.28    332.79   -1.75%   25.7% - 27.3%
+SPY       778.53    772.06    778.59    768.02   -0.83%   11.9% - 13.8%
+TSLA      379.81    359.84    382.09    357.74   -5.26%   54.3% - 61.1%
+```
+
+  Each day opens at the previous close, since the overnight step changes nothing. Daily moves are about σ/√252 (SPY 0.7 %, TSLA 3.4 %), and the vol ranges stay close to the seed vols.
+- Open issues: four added under Open issues above (Parts 11, 11, 19, 19). The Part 8 `MarketState` item is closed.
