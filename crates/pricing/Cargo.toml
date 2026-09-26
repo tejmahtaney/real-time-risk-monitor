@@ -20,4 +20,10 @@ serde = ["dep:serde"]
 
 [dev-dependencies]
 approx.workspace = true
+# Benchmarks only. No default features: no plotting or HTML reports, which keeps the tree small.
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
 proptest.workspace = true
+
+[[bench]]
+name = "greeks"
+harness = false

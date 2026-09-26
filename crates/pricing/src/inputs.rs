@@ -15,6 +15,17 @@ pub enum OptionType {
     Put,
 }
 
+impl OptionType {
+    /// ω: +1 for a call and −1 for a put. Lets one expression cover both
+    /// payoffs, for example the value ω·(F − K).
+    pub(crate) fn sign(self) -> f64 {
+        match self {
+            Self::Call => 1.0,
+            Self::Put => -1.0,
+        }
+    }
+}
+
 /// Validated inputs for pricing one European option.
 ///
 /// The fields are private and the only way in is [`BsInputs::new`] (or the

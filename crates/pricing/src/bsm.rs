@@ -8,18 +8,19 @@ pub const MIN_TOTAL_VOL: f64 = 1e-12;
 
 /// The quantities every BSM formula shares, computed once per option.
 ///
-/// Part 3 (Greeks) reuses this so that d1, d2, N(·) and the discount factors
-/// are never recomputed.
+/// [`price`] and [`greeks`](crate::greeks) both start from this, so d1, d2 and
+/// the discount factors are never recomputed and the two always agree.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Terms {
     /// e^(−rT).
     pub(crate) discount_rate: f64,
     /// e^(−qT).
     pub(crate) discount_yield: f64,
+    /// S·e^(−qT), the spot discounted at the dividend yield.
+    pub(crate) forward_spot: f64,
+    /// K·e^(−rT), the strike discounted at the risk-free rate.
+    pub(crate) discounted_strike: f64,
     /// √T.
-    // Not read by `price`. Part 3 (Greeks) needs √T for vega and gamma, and the
-    // helper is specified to compute it once, so it lives here.
-    #[allow(dead_code)]
     pub(crate) sqrt_t: f64,
     /// `(d1, d2)`, or `None` when σ·√T is below [`MIN_TOTAL_VOL`] and they are
     /// not defined in floating point.
@@ -40,13 +41,40 @@ impl Terms {
             let d1 = ((inputs.spot() / inputs.strike()).ln() + drift * t) / total_vol;
             Some((d1, d1 - total_vol))
         };
+        let discount_rate = (-inputs.rate() * t).exp();
+        let discount_yield = (-inputs.dividend_yield() * t).exp();
         Self {
-            discount_rate: (-inputs.rate() * t).exp(),
-            discount_yield: (-inputs.dividend_yield() * t).exp(),
+            discount_rate,
+            discount_yield,
+            forward_spot: inputs.spot() * discount_yield,
+            discounted_strike: inputs.strike() * discount_rate,
             sqrt_t,
             d,
         }
     }
+
+    /// Value from the two signed normal CDFs, where `n1 = N(ω·d1)` and
+    /// `n2 = N(ω·d2)` with ω = +1 for a call and −1 for a put:
+    /// ω·(S·e^(−qT)·n1 − K·e^(−rT)·n2).
+    ///
+    /// For a call this is S·e^(−qT)·N(d1) − K·e^(−rT)·N(d2). For a put it is
+    /// K·e^(−rT)·N(−d2) − S·e^(−qT)·N(−d1). The result is clamped at zero:
+    /// the exact value is never negative, but deep out of the money the two
+    /// terms are almost equal and rounding can leave a residue of about −1e-30.
+    pub(crate) fn value(&self, option_type: OptionType, n1: f64, n2: f64) -> f64 {
+        (option_type.sign() * (self.forward_spot * n1 - self.discounted_strike * n2)).max(0.0)
+    }
+
+    /// The value when σ·√T is below [`MIN_TOTAL_VOL`]: the discounted forward
+    /// intrinsic value, max(ω·(S·e^(−qT) − K·e^(−rT)), 0).
+    pub(crate) fn forward_intrinsic(&self, option_type: OptionType) -> f64 {
+        (option_type.sign() * (self.forward_spot - self.discounted_strike)).max(0.0)
+    }
+}
+
+/// Intrinsic value at expiry, max(S − K, 0) for a call and max(K − S, 0) for a put.
+pub(crate) fn intrinsic(option_type: OptionType, spot: f64, strike: f64) -> f64 {
+    (option_type.sign() * (spot - strike)).max(0.0)
 }
 
 /// Black-Scholes-Merton price of a European option with continuous dividend yield `q`.
@@ -78,20 +106,11 @@ impl Terms {
 /// # Ok::<(), pricing::PricingError>(())
 /// ```
 pub fn price(option_type: OptionType, inputs: &BsInputs) -> f64 {
-    let spot = inputs.spot();
-    let strike = inputs.strike();
-
     if inputs.time_to_expiry() == 0.0 {
-        return match option_type {
-            OptionType::Call => (spot - strike).max(0.0),
-            OptionType::Put => (strike - spot).max(0.0),
-        };
+        return intrinsic(option_type, inputs.spot(), inputs.strike());
     }
 
     let terms = Terms::new(inputs);
-    let forward_spot = spot * terms.discount_yield;
-    let discounted_strike = strike * terms.discount_rate;
-
     let Some((d1, d2)) = terms.d else {
         // As σ → 0 the terminal price S_T = S·e^((r−q−σ²/2)T + σ√T·Z) tends to
         // the forward S·e^((r−q)T) with certainty. The option then pays
@@ -99,19 +118,11 @@ pub fn price(option_type: OptionType, inputs: &BsInputs) -> f64 {
         // max(S·e^(−qT) − K·e^(−rT), 0). N(d1) and N(d2) tend to 0 or 1, so
         // the closed form converges to the same value, but d1 and d2 blow up
         // as σ·√T → 0, so we return the limit directly.
-        return match option_type {
-            OptionType::Call => (forward_spot - discounted_strike).max(0.0),
-            OptionType::Put => (discounted_strike - forward_spot).max(0.0),
-        };
+        return terms.forward_intrinsic(option_type);
     };
 
-    let value = match option_type {
-        OptionType::Call => forward_spot * normal::cdf(d1) - discounted_strike * normal::cdf(d2),
-        OptionType::Put => discounted_strike * normal::cdf(-d2) - forward_spot * normal::cdf(-d1),
-    };
-    // The exact price is never negative. Deep out of the money the two terms
-    // are almost equal and rounding can leave a residue of about -1e-30.
-    value.max(0.0)
+    let w = option_type.sign();
+    terms.value(option_type, normal::cdf(w * d1), normal::cdf(w * d2))
 }
 
 #[cfg(test)]
