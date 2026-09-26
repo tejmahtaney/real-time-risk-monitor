@@ -108,7 +108,7 @@ impl MarketConfig {
             return invalid("symbols must not be empty".into());
         }
         for (i, symbol) in self.symbols.iter().enumerate() {
-            if self.symbols[..i].contains(symbol) {
+            if self.symbols.iter().take(i).any(|s| s == symbol) {
                 return invalid(format!("symbol {symbol} is listed twice"));
             }
             if !self.dividend_yields.contains_key(symbol) {

@@ -52,8 +52,12 @@ pub fn read_fallback(
     if bars.is_empty() {
         return Err(fail(&path, "no rows"));
     }
-    if let Some(pair) = bars.windows(2).find(|w| w[0].date == w[1].date) {
-        return Err(fail(&path, format!("date {} appears twice", pair[0].date)));
+    let repeated = bars.windows(2).find_map(|w| match w {
+        [a, b] if a.date == b.date => Some(a.date),
+        _ => None,
+    });
+    if let Some(date) = repeated {
+        return Err(fail(&path, format!("date {date} appears twice")));
     }
     Ok(Some(bars))
 }
