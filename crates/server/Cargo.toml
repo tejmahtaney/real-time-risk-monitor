@@ -1,0 +1,20 @@
+[package]
+name = "server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+engine = { workspace = true }
+
+[lib]
+name = "server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "risk-monitor"
+path = "src/main.rs"

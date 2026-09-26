@@ -1,0 +1,17 @@
+[package]
+name = "engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pricing = { workspace = true }
+domain = { workspace = true }
+storage = { workspace = true }
+portfolio = { workspace = true }
+marketdata = { workspace = true }
+risk = { workspace = true }
