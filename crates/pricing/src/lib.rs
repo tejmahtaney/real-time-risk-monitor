@@ -3,7 +3,8 @@
 //! Part 2 provides the [`normal`] distribution, validated [`BsInputs`] and the
 //! Black-Scholes-Merton [`price`] of a European option with a continuous
 //! dividend yield. Part 3 adds [`greeks`], the analytic delta, gamma, vega,
-//! theta, rho, vanna and volga. All rates, yields and volatilities are decimals
+//! theta, rho, vanna and volga. Part 4 adds [`implied_volatility`], a
+//! safeguarded Newton solver with a bisection fallback. All rates, yields and volatilities are decimals
 //! (0.05 means 5 %) and time is in years.
 //!
 //! ```
@@ -21,10 +22,12 @@
 mod bsm;
 mod error;
 mod greeks;
+mod implied_vol;
 mod inputs;
 pub mod normal;
 
 pub use bsm::{MIN_TOTAL_VOL, price};
 pub use error::PricingError;
 pub use greeks::{Greeks, greeks};
+pub use implied_vol::{IvError, IvRequest, IvSolution, implied_volatility};
 pub use inputs::{BsInputs, OptionType};

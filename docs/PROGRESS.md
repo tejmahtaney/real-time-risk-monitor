@@ -30,3 +30,13 @@ None yet.
 - Benchmark (release, this machine): 40.8 ns for one `greeks()` call, 441 µs for 10,000 varied options, so 44.1 ns per option (22.7 million options a second).
 - Deviations from the prompt, both in the test tolerance only. (1) Each finite-difference tolerance adds the round-off the difference cannot avoid, 8·ε·(S + K)/hⁿ, because a deep in-the-money price is made of terms of size S + K and the fixed 1e-8 floor is smaller than that noise for short-dated, low-vol options. (2) Volga uses one Richardson step, (4·D(h/2) − D(h))/3 with h = 1e-4. A plain h = 1e-4 second difference fails 1e-5 relative error at 5 % vol six deviations out of the money, where the h² truncation term alone is about 6e-5. The analytic value was right.
 - Open issues: none.
+
+### Part 04 - Implied volatility solver
+
+- Built: `pricing::implied_volatility` taking an `IvRequest` and returning an `IvSolution` (volatility and iteration count) or an `IvError` (`Expired`, `BelowIntrinsic`, `AboveUpperBound`, `NoConvergence`, `InvalidInput`). Safeguarded Newton on vega with a bracket [1e-6, 10] tightened on every evaluation, bisection when vega is under 1e-12 or the step leaves the bracket, and Brenner-Subrahmanyam as the start guess. Validation reuses `BsInputs::new` with a placeholder σ of 1, and a non-finite price is `PricingError::NonFinite`. One `greeks()` call per iteration gives price and vega.
+- New dependencies: none. A second criterion bench, `benches/implied_vol.rs`.
+- Tests: 67 in the workspace (51 unit and property tests, 16 doc tests). 13 new unit and property tests, 1 new doc test. Every `IvError` variant has a test. The property tests also passed at 300,000 cases per test.
+- Iterations: over a grid of 5,040 round-trip cases the mean is 8.64 and the maximum 33. Pure bisection needs about 50. The 64 limit holds over 300,000 random cases.
+- Benchmark (release, this machine): 160 ns for one near-the-money solve and 762 ns for a deep out-of-the-money one.
+- Choices the prompt left open. (1) The upper-bound tolerance is one-sided the same way as the lower: a price within 1e-12 × max(S, K) of S·e^(−qT) or K·e^(−rT) counts as on the bound and is `AboveUpperBound`. (2) A root below 1e-6, such as a price exactly on intrinsic, returns 1e-6 and not an error. (3) A root above 10 is `NoConvergence`, detected when the bracket collapses onto the ceiling with the price still out of reach. (4) Where vega is tiny the solver returns any σ that reproduces the price to 1e-12 × max(1, price), which need not be the σ that made it.
+- Open issues: none.

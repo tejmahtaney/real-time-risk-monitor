@@ -27,3 +27,7 @@ proptest.workspace = true
 [[bench]]
 name = "greeks"
 harness = false
+
+[[bench]]
+name = "implied_vol"
+harness = false
