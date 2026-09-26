@@ -1,0 +1,34 @@
+# Sample portfolio for the Real-Time Risk Monitor.
+#
+# Columns: id,underlying,kind,strike,expiry,quantity,entry_price,iv
+#   kind         equity, call or put.
+#   strike       A number, or ATM, ATM+5%, ATM-10% (relative to the spot at load time).
+#                Blank for equity. Resolved strikes are rounded to a listed strike.
+#   expiry       YYYY-MM-DD, +0d (expires today) or +Nd (the first Friday on or after
+#                the start date plus N days). Blank for equity.
+#   quantity     Signed. Long is positive, short is negative. Shares for equity, contracts for options.
+#   entry_price  Per share. Blank means the theoretical value at load time, so day-one P&L is zero.
+#   iv           Volatility override as a decimal. Blank means use the underlying's volatility.
+#
+# Relative strikes and expiries keep the book near the money and live whatever the
+# real prices and the date are.
+id,underlying,kind,strike,expiry,quantity,entry_price,iv
+# SPY: long stock hedged with a long put 5 % out of the money.
+spy-stock,SPY,equity,,,500,,
+spy-put-hedge,SPY,put,ATM-5%,+30d,5,,
+# SPY: a long at-the-money call that expires today, so the demo shows an option expiring.
+spy-call-expiring,SPY,call,ATM,+0d,5,,
+# AAPL: covered call. Long stock and short calls 5 % out of the money.
+aapl-stock,AAPL,equity,,,300,,
+aapl-cc-call,AAPL,call,ATM+5%,+30d,-3,,
+# MSFT: long straddle. Long gamma and long vega.
+msft-straddle-call,MSFT,call,ATM,+45d,10,,
+msft-straddle-put,MSFT,put,ATM,+45d,10,,
+# NVDA: short straddle at about 14 days. Short gamma and short vega.
+nvda-straddle-call,NVDA,call,ATM,+14d,-5,,
+nvda-straddle-put,NVDA,put,ATM,+14d,-5,,
+# TSLA: bull call spread. Long the at-the-money call, short the call 10 % above.
+tsla-spread-long,TSLA,call,ATM,+30d,10,,
+tsla-spread-short,TSLA,call,ATM+10%,+30d,-10,,
+# TSLA: a put with a volatility override of 65 %.
+tsla-put-iv,TSLA,put,ATM-10%,+45d,2,,0.65
