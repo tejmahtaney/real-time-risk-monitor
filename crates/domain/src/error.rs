@@ -34,6 +34,12 @@ pub enum DomainError {
     /// An implied-volatility override must be strictly positive.
     #[error("volatility override must be positive, got {0}")]
     InvalidVolOverride(f64),
+    /// A clock speed must be finite and strictly positive.
+    #[error("clock speed must be finite and positive, got {0}")]
+    InvalidSpeed(f64),
+    /// A market update named a symbol the market has no data for.
+    #[error("market has no data for {0}")]
+    UnknownSymbol(String),
 }
 
 /// Checks that `value` is finite, naming `field` on failure.

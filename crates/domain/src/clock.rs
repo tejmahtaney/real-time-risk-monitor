@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 
-/// A source of the current time. The simulated clock arrives in Part 8.
+/// A source of the current time. [`SimClock`](crate::SimClock) is the simulated one.
 pub trait Clock: Send + Sync {
     /// The current instant.
     fn now(&self) -> DateTime<Utc>;

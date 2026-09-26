@@ -12,6 +12,7 @@ mod error;
 mod instrument;
 mod market;
 mod position;
+mod sim_clock;
 mod symbol;
 mod time;
 
@@ -21,5 +22,8 @@ pub use instrument::{DEFAULT_MULTIPLIER, Instrument, InstrumentKind, OptionContr
 pub use market::{MarketState, UnderlyingState};
 pub use position::{Position, PositionId};
 pub use pricing::OptionType;
+pub use sim_clock::{
+    ClockStep, SimClock, StepKind, TRADING_SECONDS_PER_YEAR, next_session_open_after,
+};
 pub use symbol::Symbol;
 pub use time::{MARKET_TZ, market_date, year_fraction};

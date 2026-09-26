@@ -176,6 +176,46 @@ impl MarketState {
     pub fn insert(&mut self, symbol: Symbol, state: UnderlyingState) {
         self.underlyings.insert(symbol, state);
     }
+
+    /// Moves the market to `as_of` with new spots and vols, keeping each dividend yield
+    /// and the rate. All or nothing: when any update fails, the market is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// [`DomainError::UnknownSymbol`] for a symbol the market does not hold, and the
+    /// [`UnderlyingState::new`] errors for a bad spot or vol.
+    ///
+    /// ```
+    /// use chrono::{TimeZone, Utc};
+    /// use domain::{MarketState, Symbol, UnderlyingState};
+    ///
+    /// let t = Utc.with_ymd_and_hms(2026, 10, 1, 14, 30, 0).unwrap();
+    /// let spy = Symbol::new("SPY")?;
+    /// let mut market = MarketState::new(t, 0.04, [(spy.clone(), UnderlyingState::new(600.0, 0.16, 0.013)?)])?;
+    /// let later = Utc.with_ymd_and_hms(2026, 10, 1, 14, 31, 0).unwrap();
+    /// market.update(later, [(spy.clone(), 601.5, 0.17)])?;
+    /// let state = market.underlying(&spy).unwrap();
+    /// assert_eq!((state.spot(), state.vol(), state.dividend_yield()), (601.5, 0.17, 0.013));
+    /// # Ok::<(), domain::DomainError>(())
+    /// ```
+    pub fn update(
+        &mut self,
+        as_of: DateTime<Utc>,
+        updates: impl IntoIterator<Item = (Symbol, f64, f64)>,
+    ) -> Result<(), DomainError> {
+        let mut staged = Vec::new();
+        for (symbol, spot, vol) in updates {
+            let current = self
+                .underlyings
+                .get(&symbol)
+                .ok_or_else(|| DomainError::UnknownSymbol(symbol.to_string()))?;
+            let state = UnderlyingState::new(spot, vol, current.dividend_yield())?;
+            staged.push((symbol, state));
+        }
+        self.as_of = as_of;
+        self.underlyings.extend(staged);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -191,6 +231,63 @@ mod tests {
 
     fn t() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 1, 14, 30, 0).unwrap()
+    }
+
+    #[test]
+    fn update_replaces_spot_and_vol_and_keeps_the_yield() {
+        let later = t() + chrono::Duration::minutes(1);
+        let mut market = MarketState::new(
+            t(),
+            0.04,
+            [
+                (
+                    sym("SPY"),
+                    UnderlyingState::new(600.0, 0.16, 0.013).unwrap(),
+                ),
+                (
+                    sym("AAPL"),
+                    UnderlyingState::new(230.0, 0.25, 0.005).unwrap(),
+                ),
+            ],
+        )
+        .unwrap();
+        market.update(later, [(sym("SPY"), 601.0, 0.17)]).unwrap();
+        assert_eq!(market.as_of(), later);
+        let spy = market.underlying(&sym("SPY")).unwrap();
+        assert_relative_eq!(spy.spot(), 601.0);
+        assert_relative_eq!(spy.vol(), 0.17);
+        assert_relative_eq!(spy.dividend_yield(), 0.013);
+        assert_relative_eq!(market.underlying(&sym("AAPL")).unwrap().spot(), 230.0);
+    }
+
+    #[test]
+    fn a_failed_update_changes_nothing() {
+        let later = t() + chrono::Duration::minutes(1);
+        let mut market = MarketState::new(
+            t(),
+            0.04,
+            [
+                (
+                    sym("SPY"),
+                    UnderlyingState::new(600.0, 0.16, 0.013).unwrap(),
+                ),
+                (
+                    sym("AAPL"),
+                    UnderlyingState::new(230.0, 0.25, 0.005).unwrap(),
+                ),
+            ],
+        )
+        .unwrap();
+        let before = market.clone();
+        let bad_vol = market.update(
+            later,
+            [(sym("SPY"), 601.0, 0.17), (sym("AAPL"), 231.0, 0.0)],
+        );
+        assert_eq!(bad_vol, Err(DomainError::InvalidVol(0.0)));
+        assert_eq!(market, before);
+        let unknown = market.update(later, [(sym("MSFT"), 500.0, 0.3)]);
+        assert_eq!(unknown, Err(DomainError::UnknownSymbol("MSFT".into())));
+        assert_eq!(market, before);
     }
 
     #[test]
