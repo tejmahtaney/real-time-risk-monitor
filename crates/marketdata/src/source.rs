@@ -15,9 +15,11 @@ use crate::error::MarketDataError;
 /// The Alpha Vantage query endpoint.
 pub const DEFAULT_BASE_URL: &str = "https://www.alphavantage.co/query";
 
-/// Default gap between requests. The free-tier documentation states no per-minute limit,
-/// only 25 requests a day, so this is a cheap safety margin and not a documented rule.
-pub const DEFAULT_REQUEST_INTERVAL: Duration = Duration::from_secs(1);
+/// Default gap between the end of one request and the start of the next. The
+/// documentation pages state only 25 requests a day for free keys, but the API itself
+/// answers "1 request per second" when that burst limit is broken, and timing the gap
+/// from the start of the previous request was too tight in practice. 2 s leaves margin.
+pub const DEFAULT_REQUEST_INTERVAL: Duration = Duration::from_secs(2);
 
 const FUNCTION: &str = "TIME_SERIES_DAILY";
 const OUTPUT_SIZE: &str = "compact";
@@ -123,21 +125,8 @@ impl AlphaVantageSource {
         })
     }
 
-    /// Waits until `min_interval` has passed since the previous request started.
-    async fn pace(&self) {
-        let mut last = self.last_request.lock().await;
-        if let Some(previous) = *last {
-            if let Some(wait) = self.min_interval.checked_sub(previous.elapsed()) {
-                tokio::time::sleep(wait).await;
-            }
-        }
-        *last = Some(Instant::now());
-    }
-}
-
-impl HistorySource for AlphaVantageSource {
-    async fn download(&self, symbol: &Symbol) -> Result<Download, MarketDataError> {
-        self.pace().await;
+    /// Sends one request.
+    async fn request(&self, symbol: &Symbol) -> Result<Download, MarketDataError> {
         let params = RequestParams {
             function: FUNCTION.into(),
             symbol: symbol.as_str().into(),
@@ -172,6 +161,22 @@ impl HistorySource for AlphaVantageSource {
             raw_body,
             params,
         })
+    }
+}
+
+impl HistorySource for AlphaVantageSource {
+    async fn download(&self, symbol: &Symbol) -> Result<Download, MarketDataError> {
+        // The guard is held for the whole request, so requests never overlap and the
+        // gap is measured from the end of the previous one, whether it succeeded or not.
+        let mut last = self.last_request.lock().await;
+        if let Some(previous) = *last
+            && let Some(wait) = self.min_interval.checked_sub(previous.elapsed())
+        {
+            tokio::time::sleep(wait).await;
+        }
+        let result = self.request(symbol).await;
+        *last = Some(Instant::now());
+        result
     }
 }
 
