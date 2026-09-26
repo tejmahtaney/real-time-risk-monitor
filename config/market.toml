@@ -1,0 +1,43 @@
+# Market inputs for the real-data seed (Part 7). All rates, yields and vols are
+# decimals: 0.05 means 5 %. Rates are continuously compounded.
+
+symbols = ["SPY", "AAPL", "MSFT", "NVDA", "TSLA"]
+
+# Risk-free rate, continuously compounded.
+# Source: US Treasury, Daily Treasury Par Yield Curve Rates, 3 Mo, 2026-09-25: 4.20 %.
+# https://home.treasury.gov/resource-center/data-chart-center/interest-rates
+# Treasury par yields are bond-equivalent (semi-annual compounding), so the
+# continuous rate is r = 2 * ln(1 + 0.0420 / 2) = 0.0415651.
+risk_free_rate = 0.0415651
+
+# Volatility estimate. The last `vol_window_days` daily log returns feed the
+# realised vol, the EWMA vol and the correlation matrix.
+vol_window_days = 60
+# "realised" (sample standard deviation) or "ewma" (RiskMetrics, lambda 0.94).
+vol_method = "realised"
+
+# An archived download younger than this counts as a cache hit, so the app does
+# not spend the free tier's 25 requests a day on every start.
+cache_max_age_hours = 24
+
+# "auto" tries the local archive, then the Alpha Vantage API, then the committed
+# fallback files. "offline" never calls the API.
+data_mode = "auto"
+
+# Dividend yields, used as the continuous yield q directly. At these sizes the
+# difference from a continuous conversion is far below the quoting precision.
+# Source for every figure unless noted: StockAnalysis dividend pages, read on
+# 2026-09-26 (https://stockanalysis.com/stocks/<ticker>/dividend/). Their
+# "annual dividend" is the latest payment annualised, which is close to the
+# trailing figure for these steady payers.
+[dividend_yields]
+# SPY: 0.98 %, $7.58 paid over the past year (https://stockanalysis.com/etf/spy/dividend/, data of 2026-09-25).
+SPY = 0.0098
+# AAPL: 0.32 %, $1.08 a year (last ex-dividend date 2026-08-10).
+AAPL = 0.0032
+# MSFT: 0.76 %, $3.92 a year (data of 2026-09-25).
+MSFT = 0.0076
+# NVDA: 0.44 %, $1.00 a year, $0.25 a quarter (data of 2026-09-25).
+NVDA = 0.0044
+# TSLA: pays no dividend.
+TSLA = 0.0

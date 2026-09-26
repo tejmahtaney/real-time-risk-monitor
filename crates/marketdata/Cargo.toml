@@ -11,3 +11,18 @@ workspace = true
 [dependencies]
 domain = { workspace = true }
 storage = { workspace = true }
+chrono.workspace = true
+csv.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+dotenvy.workspace = true
+tempfile.workspace = true
+wiremock.workspace = true
