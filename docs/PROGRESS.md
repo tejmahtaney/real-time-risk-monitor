@@ -2,7 +2,9 @@
 
 ## Open issues
 
-None yet.
+- Part 13: `PositionSpec` and its strike and expiry types already serialise, but there is no CSV writer yet. Part 5 only loads.
+- Part 8: `MarketState` has `insert` but no bulk update of spots. The simulator needs one.
+- Part 19: option multipliers are `f64` and honoured everywhere, but nothing adjusts strikes or multipliers for splits yet.
 
 ## Log
 
@@ -40,3 +42,12 @@ None yet.
 - Benchmark (release, this machine): 160 ns for one near-the-money solve and 762 ns for a deep out-of-the-money one.
 - Choices the prompt left open. (1) The upper-bound tolerance is one-sided the same way as the lower: a price within 1e-12 × max(S, K) of S·e^(−qT) or K·e^(−rT) counts as on the bound and is `AboveUpperBound`. (2) A root below 1e-6, such as a price exactly on intrinsic, returns 1e-6 and not an error. (3) A root above 10 is `NoConvergence`, detected when the bracket collapses onto the ceiling with the price still out of reach. (4) Where vega is tiny the solver returns any σ that reproduces the price to 1e-12 × max(1, price), which need not be the σ that made it.
 - Open issues: none.
+
+### Part 05 - Domain types and position book
+
+- Built: `domain` with `Symbol`, `PositionId`, `Instrument`/`OptionContract` (multiplier default 100, `expiry_datetime()` at 16:00 America/New_York as UTC), `Position`, validated `UnderlyingState` and `MarketState`, the `Clock` trait with `FixedClock`, `year_fraction` (ACT/365) and `market_date`. `pricing::OptionType` is re-exported and the `serde` feature of `pricing` is on. `portfolio` with CSV parsing into `PositionSpec` (errors name line and column), relative strikes (`ATM`, `ATM+5%`) and expiries (`+0d`, `+Nd`), `resolve`, `PositionBook` (`add`, `remove`, `get`, `iter`, `underlyings`), `value_all` giving `PositionRisk` with reporting Greeks and a status, and `settle_expired` for cash settlement. `data/sample_portfolio.csv` has 12 positions over SPY, AAPL, MSFT, NVDA and TSLA.
+- New dependency: `csv` 1, for the portfolio CSV parser. `portfolio` also depends on `pricing` directly, for `greeks` and `BsInputs` (no cycle).
+- Tests: 168 in the workspace (up from 67). `domain` has 31 unit and 10 doc tests. `portfolio` has 54 unit, 3 integration and 3 doc tests.
+- Choices the prompt left open. (1) Strike rounding picks the step from the raw strike: below 100 rounds to 1, 100 up to but not including 1,000 rounds to 5, 1,000 and above rounds to 10. (2) Relative expiries count from the New York date of the start time, and `+0d` is exactly that date. (3) `csv` comment lines (`#`) are allowed, and lines are counted physically for error messages. (4) A settled position has market value 0 because the cash was paid out, and its P&L is all in realised. (5) An option past expiry that is not settled is an `Error` row. (6) On an `Error` row the derived numbers are zero, never NaN. (7) Strike and expiry must be blank for equity and present for options.
+- Open issues: three, listed under Open issues above.
+
