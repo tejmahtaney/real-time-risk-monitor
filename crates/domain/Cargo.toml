@@ -9,4 +9,13 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-pricing = { workspace = true }
+# The `serde` feature makes `OptionType` serialisable, and domain re-exports it.
+pricing = { workspace = true, features = ["serde"] }
+chrono.workspace = true
+chrono-tz.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+serde_json.workspace = true

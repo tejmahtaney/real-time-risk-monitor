@@ -34,6 +34,7 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 tracing = "0.1"
+csv = "1"
 
 # Dev crates.
 approx = "0.5"
