@@ -10,3 +10,12 @@ workspace = true
 
 [dependencies]
 portfolio = { workspace = true }
+domain = { workspace = true }
+serde.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+chrono.workspace = true
+pricing = { workspace = true }
+proptest.workspace = true
+serde_json.workspace = true
