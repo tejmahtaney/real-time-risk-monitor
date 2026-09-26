@@ -153,7 +153,7 @@ pub fn next_session_open_after(date: NaiveDate) -> DateTime<Utc> {
 
 /// A simulated clock that runs only through US market hours.
 ///
-/// A session is 09:30 to 16:00 America/New_York on a weekday. **Exchange holidays are
+/// A session is 09:30 to 16:00 New York time on a weekday. **Exchange holidays are
 /// ignored**: every Monday to Friday is a session, including days such as Thanksgiving
 /// when the real market is shut. Daylight saving is handled by working in New York local
 /// time, so a session is always 6.5 trading hours, and the gap between sessions changes
@@ -307,7 +307,7 @@ fn check_speed(speed: f64) -> Result<(), DomainError> {
 
 #[cfg(test)]
 mod tests {
-    use approx::assert_relative_eq;
+    use approx::{assert_abs_diff_eq, assert_relative_eq};
 
     use super::*;
 
@@ -386,7 +386,7 @@ mod tests {
         assert_eq!(step.from, utc(2026, 9, 28, 20, 0));
         assert_eq!(step.to, utc(2026, 9, 29, 13, 30));
         assert_eq!(step.session_date, date(2026, 9, 29));
-        assert_eq!(step.trading_years, 0.0);
+        assert_abs_diff_eq!(step.trading_years, 0.0);
         // 17.5 hours.
         assert_relative_eq!(step.calendar_years, 17.5 * 3_600.0 / (365.0 * 86_400.0));
         // The session then runs normally from the open.
@@ -405,7 +405,7 @@ mod tests {
         assert_eq!(step.from, utc(2026, 9, 25, 20, 0));
         assert_eq!(step.to, utc(2026, 9, 28, 13, 30));
         assert_eq!(step.session_date, date(2026, 9, 28));
-        assert_eq!(step.trading_years, 0.0);
+        assert_abs_diff_eq!(step.trading_years, 0.0);
         // Friday 16:00 to Monday 09:30 is 65.5 hours: about 0.0075 years.
         assert_relative_eq!(hours(&step), 65.5);
         assert_relative_eq!(step.calendar_years, 65.5 * 3_600.0 / (365.0 * 86_400.0));
@@ -520,8 +520,8 @@ mod tests {
         let frozen = clock.advance(BIG);
         assert_eq!(frozen.kind, StepKind::Intraday);
         assert_eq!(frozen.from, frozen.to);
-        assert_eq!(frozen.trading_years, 0.0);
-        assert_eq!(frozen.calendar_years, 0.0);
+        assert_abs_diff_eq!(frozen.trading_years, 0.0);
+        assert_abs_diff_eq!(frozen.calendar_years, 0.0);
         assert_eq!(clock.now(), monday_open());
         clock.resume();
         assert!(!clock.is_paused());
