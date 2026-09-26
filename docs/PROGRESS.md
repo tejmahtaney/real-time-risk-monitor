@@ -21,3 +21,12 @@ None yet.
 - Tests: 39 (25 unit and property tests, 14 doc tests). Workspace total 39.
 - Notes: `#[allow(dead_code)]` on `Terms::sqrt_t`, which Part 3 will read. `#![allow(clippy::excessive_precision, clippy::unreadable_literal)]` in two test modules, so mpmath reference values stay verbatim.
 - Open issues: none.
+
+### Part 03 - Greeks
+
+- Built: `pricing::greeks` returning a `Greeks` struct (price, delta, gamma, vega, theta, rho, vanna, volga, all raw per-unit) with the formula on each field's doc comment. `Terms` now also holds S·e^(−qT) and K·e^(−rT) and owns the value expression, so `price()` and `greeks().price` come from the same code and agree bit for bit. Put delta is −e^(−qT)·N(−d1), not e^(−qT)·(N(d1) − 1). Degenerate cases (T = 0, σ·√T below `MIN_TOTAL_VOL`) are documented on `greeks`. The `#[allow(dead_code)]` on `Terms::sqrt_t` from Part 2 is gone because Greeks read it.
+- New dependency: `criterion` 0.7 as a dev-dependency of `pricing`, with default features off (no plotting or HTML reports). Reason: the benchmark in `benches/greeks.rs`.
+- Tests: 53 in the workspace (38 unit and property tests, 15 doc tests). 13 new unit and property tests cover mpmath references (Hull, dividend case, Haug), T = 0, tiny σ·√T, edge cases, finite differences for calls and puts, call-put identities, signs and ranges, and exact price agreement. The property tests also passed at 300,000 cases per test.
+- Benchmark (release, this machine): 40.8 ns for one `greeks()` call, 441 µs for 10,000 varied options, so 44.1 ns per option (22.7 million options a second).
+- Deviations from the prompt, both in the test tolerance only. (1) Each finite-difference tolerance adds the round-off the difference cannot avoid, 8·ε·(S + K)/hⁿ, because a deep in-the-money price is made of terms of size S + K and the fixed 1e-8 floor is smaller than that noise for short-dated, low-vol options. (2) Volga uses one Richardson step, (4·D(h/2) − D(h))/3 with h = 1e-4. A plain h = 1e-4 second difference fails 1e-5 relative error at 5 % vol six deviations out of the money, where the h² truncation term alone is about 6e-5. The analytic value was right.
+- Open issues: none.
