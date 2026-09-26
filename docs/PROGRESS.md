@@ -5,6 +5,9 @@
 - Part 13: `PositionSpec` and its strike and expiry types already serialise, but there is no CSV writer yet. Part 5 only loads.
 - Part 8: `MarketState` has `insert` but no bulk update of spots. The simulator needs one.
 - Part 19: option multipliers are `f64` and honoured everywhere, but nothing adjusts strikes or multipliers for splits yet.
+- Part 19: the split detector (Part 7) only sees splits inside the 100-day fetched window and only matches ratios within 2 % of 1.5, 2, 3, 4, 5, 10, 20 or their inverses. A real one-day drop of about 33 % would be misread as a 3-for-2 split. It is logged as a warning, so it is visible.
+- Part 8: `SeedData::to_market_state` gives the starting `MarketState`, and `SeedData::correlation` is in `symbols` order for the correlated GBM.
+- Part 13: `Archive` only saves and reads. It has no listing, usage or delete support, and the storage browser (Part 22) will need those.
 
 ## Log
 
@@ -59,3 +62,33 @@
 - Tests: 183 in the workspace (up from 168). `risk` has 12 unit and property tests, 2 integration tests and 1 doc test. The property tests also passed at 100,000 cases per test.
 - Choices the prompt left open. (1) `position_count` counts active positions only. (2) An underlying with only expired positions still has an entry, with zero risk, its realised P&L and the settlement spot. An underlying with only error positions has none. (3) Concentration lists every underlying, including ones with zero gross exposure (fraction 0), largest first and ties in symbol order. It is empty when total gross exposure is zero or not finite. (4) The Part 5 sample book holds 300 shares and three short calls, so the "70 shares" covered call is a hand-built 100 shares and one call of delta 0.30. The sample book is checked separately by an integration test against 300 − 300 × delta.
 - Open issues: none.
+
+
+### Part 07 - Real market data and calibration
+
+- Built: `storage` foundation: `StorageRoot` (`resolve()` is a thin wrapper over the pure `resolve_from(env, cwd)`, `at()` for tests, `join` and `subdir` that reject empty, `.`, `..`, separator, NUL and absolute parts), `write_json_atomic` (temp file, sync, rename, temp removed on failure), `write_json_new` (`<UTC>-<stem>.json` with `create_new`, `_02`, `_03` on a same-second clash), `list`, `read_json`. `marketdata`: `MarketConfig` (validated TOML), `HistorySource` trait and `AlphaVantageSource` (key injected, `Note`, `Error Message` and limit-style `Information` bodies mapped to `RateLimited` or `InvalidSymbol`, key hidden from `Debug` and from errors), `Archive`, fallback CSV reader and writer, `HistoryLoader` (fresh archive, API, any-age archive, fallback; `offline` skips the API), `calibrate` and `SeedData::to_market_state`. `config/market.toml` with cited rate and yields. `data/fallback/{SPY,AAPL,MSFT,NVDA,TSLA}.csv` with 100 real closes each (2026-05-05 to 2026-09-25). Two examples: `fetch_fallback` (writes the CSVs through the archive path) and `show_seed` (prints the calibration below).
+- New dependencies: `tokio` (rt, macros, time, sync; async client and tests), `reqwest` 0.13 with rustls and no default features, plus `json` and `query` (the Alpha Vantage client), `toml` 1 (config). Dev only: `wiremock` 0.6 (client tests), `dotenvy` 0.15 (the fetch example reads `.env`), `tracing-subscriber` 0.3 with `fmt`, `env-filter` and `ansi` (log output in the examples). `storage` gained `serde`, `serde_json`, `chrono` and `thiserror`; `marketdata` gained `csv`, `serde`, `serde_json`, `chrono`, `thiserror`, `tracing`.
+- Tests: 249 in the workspace (up from 183). `storage` has 15 unit and 1 doc test. `marketdata` has 49 unit tests and 1 integration test (`tests/committed_data.rs`, which loads the committed fallback files and config and calibrates them).
+- Step 1 check of the Alpha Vantage docs: `TIME_SERIES_DAILY` is raw as-traded (not split or dividend adjusted), `compact` returns the latest 100 points on a free key, `full` is premium, free tier is 25 requests a day. All as planned. The documentation pages state no per-minute limit, but the live API rejected bursts with "1 request per second" (an `Information`-style limit message inside an HTTP 200). Requests are now spaced by 2 s measured from the end of the previous request (`DEFAULT_REQUEST_INTERVAL`).
+- Choices the prompt left open. (1) The `Information` body counts as `RateLimited` when it mentions request limits, else it is `Information`. (2) `HistorySource` has a second method, `download`, returning bars plus raw body and parameters, because the archive stores the raw body. `daily_closes` is a default method over it. (3) The counter for a same-second clash goes after the stem (`_02`), because any other position sorts before the plain name. (4) Split ratios 1.5 and 2/3 were added to the prompt's list at your request. (5) The EWMA starts from the first squared return in the window and uses the same window as realised vol. (6) Per-symbol vols use each symbol's own closes, the correlation uses the inner join. (7) Yields are used as the continuous yield directly. (8) SPY 0.98 % and NVDA 0.44 % are StockAnalysis figures from 2026-09-25. MSFT 0.76 % ($3.92 a year) and AAPL 0.32 % ($1.08 a year) are StockAnalysis too, and are the latest payment annualised, which is close to but not strictly trailing. My first NVDA guess of 0.02 % was arithmetic, not a source, so it was dropped.
+- Real run: SPY and AAPL fetched first, MSFT was rejected for breaking the one-a-second burst limit, then MSFT, NVDA and TSLA were fetched after the pacing fix. Five archive files are in `../storage/market-data/`. The API key appears in no archive file and in no tracked or untracked repo file.
+- Calibrated seed (as of 2026-09-25, rate 0.041565, window 60 returns, chosen vol realised; the values were also recomputed independently in Python and match):
+
+| Symbol | Spot | Realised vol | EWMA vol | Dividend yield |
+|---|---|---|---|---|
+| SPY | 771.35 | 11.18 % | 10.57 % | 0.98 % |
+| AAPL | 341.07 | 28.44 % | 25.08 % | 0.32 % |
+| MSFT | 516.17 | 38.59 % | 30.05 % | 0.76 % |
+| NVDA | 225.07 | 39.09 % | 34.38 % | 0.44 % |
+| TSLA | 372.11 | 54.71 % | 44.98 % | 0.00 % |
+
+| Correlation | SPY | AAPL | MSFT | NVDA | TSLA |
+|---|---|---|---|---|---|
+| SPY | 1.000 | 0.043 | 0.507 | 0.559 | 0.602 |
+| AAPL | 0.043 | 1.000 | -0.025 | -0.236 | -0.029 |
+| MSFT | 0.507 | -0.025 | 1.000 | 0.057 | 0.238 |
+| NVDA | 0.559 | -0.236 | 0.057 | 1.000 | 0.317 |
+| TSLA | 0.602 | -0.029 | 0.238 | 0.317 | 1.000 |
+
+  AAPL's near-zero correlation with SPY over these 60 days is unusually low. The maths was checked, so it is what the downloaded closes say, but it is worth a look. No splits were detected in any series (largest one-day move 15.7 %, TSLA).
+- Open issues: three added under Open issues above (Parts 8, 13 and 19).

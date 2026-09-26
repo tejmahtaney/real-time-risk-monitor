@@ -1781,7 +1781,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
- "tracing",
 ]
 
 [[package]]
