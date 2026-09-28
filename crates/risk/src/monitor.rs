@@ -46,17 +46,20 @@ pub enum Scope {
 /// Where a limit's utilisation stands.
 ///
 /// Utilisation at or above 1 is `Breach`. At or above [`LimitsConfig::warning_threshold`]
-/// it is `Warning`. Below that it is `Ok`. Hysteresis stops flapping around the breach
-/// line: once a limit reaches `Breach`, it stays there until utilisation drops below
-/// [`LimitsConfig::clear_threshold`], even if that means sitting in `Breach` at a
-/// utilisation that would otherwise read as `Warning` or `Ok`.
+/// it is `Warning`. Below that it is `Ok`. Hysteresis stops flapping around either line:
+/// once a limit reaches `Breach`, it stays there until utilisation drops below
+/// [`LimitsConfig::clear_threshold`]; once it reaches `Warning` (whether from `Ok` or by
+/// clearing down from `Breach`), it stays at `Warning` or above until utilisation drops
+/// below [`LimitsConfig::warning_clear_threshold`]. Both rules can hold a limit at a
+/// state that its raw utilisation, read alone, would no longer justify.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LimitState {
-    /// Utilisation is below the warning threshold (or hysteresis has not yet cleared).
+    /// Utilisation is below the warning threshold and has never reached it, or a limit
+    /// already at `Warning` or `Breach` has cleared below the warning clear threshold.
     Ok,
-    /// Utilisation is at or above the warning threshold and below 1, or a breach has not
-    /// yet cleared below the clear threshold.
+    /// Utilisation is at or above the warning threshold and below 1, or a limit already
+    /// at `Warning` or `Breach` has not yet cleared below the warning clear threshold.
     Warning,
     /// Utilisation is at or above 1, or a breach has not yet cleared below the clear
     /// threshold.
@@ -64,9 +67,15 @@ pub enum LimitState {
 }
 
 /// The next state given the current one and the fresh utilisation reading.
+///
+/// A limit already at `Warning` or `Breach` is "elevated": it only falls back to `Ok`
+/// once utilisation drops below `warning_clear_threshold`, not merely below
+/// `warning_threshold`. A limit currently `Ok` needs to reach the higher
+/// `warning_threshold` to enter `Warning` in the first place.
 fn next_state(
     current: LimitState,
     utilisation: f64,
+    warning_clear_threshold: f64,
     warning_threshold: f64,
     clear_threshold: f64,
 ) -> LimitState {
@@ -74,8 +83,14 @@ fn next_state(
         return LimitState::Breach;
     }
     if utilisation >= 1.0 {
-        LimitState::Breach
-    } else if utilisation >= warning_threshold {
+        return LimitState::Breach;
+    }
+    let entry_threshold = if current == LimitState::Ok {
+        warning_threshold
+    } else {
+        warning_clear_threshold
+    };
+    if utilisation >= entry_threshold {
         LimitState::Warning
     } else {
         LimitState::Ok
@@ -258,6 +273,7 @@ impl LimitMonitor {
         let state = next_state(
             previous,
             utilisation,
+            self.config.warning_clear_threshold,
             self.config.warning_threshold,
             self.config.clear_threshold,
         );
@@ -290,6 +306,7 @@ mod tests {
 
     fn config() -> LimitsConfig {
         LimitsConfig {
+            warning_clear_threshold: 0.75,
             warning_threshold: 0.8,
             clear_threshold: 0.95,
             portfolio: PortfolioLimits {
@@ -389,6 +406,35 @@ mod tests {
             monitor.history().count(),
             1,
             "only the initial breach event"
+        );
+    }
+
+    #[test]
+    fn hysteresis_keeps_one_warning_event_oscillating_around_the_warning_line() {
+        let mut monitor = monitor();
+
+        // Establish a baseline Ok state first.
+        let events = monitor.evaluate(&summary_with_dollar_delta(10_000.0), now());
+        assert!(events.is_empty());
+
+        // Cross into warning.
+        let events = monitor.evaluate(&summary_with_dollar_delta(82_000.0), now());
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].to, LimitState::Warning);
+
+        // Oscillate between 0.77x and 0.82x the limit several times: 0.77 is above the
+        // 0.75 warning clear threshold, so the warning should never clear back to Ok.
+        for _ in 0..5 {
+            let events = monitor.evaluate(&summary_with_dollar_delta(77_000.0), now());
+            assert!(events.is_empty(), "0.77x should not clear the warning");
+            let events = monitor.evaluate(&summary_with_dollar_delta(82_000.0), now());
+            assert!(events.is_empty(), "already in warning, no new event");
+        }
+
+        assert_eq!(
+            monitor.history().count(),
+            1,
+            "only the initial warning event"
         );
     }
 

@@ -72,12 +72,17 @@ pub enum LimitsConfigError {
 ///
 /// Load with [`LimitsConfig::load`] or [`LimitsConfig::from_toml_str`], both of which
 /// validate: every limit is positive and finite, `max_concentration` is in (0, 1], and
-/// `warning_threshold < clear_threshold < 1`.
+/// `warning_clear_threshold < warning_threshold < clear_threshold < 1`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LimitsConfig {
     /// Utilisation at or above this fraction of a limit is a warning.
     pub warning_threshold: f64,
+    /// Once a limit reaches `Warning` (or higher), it stays at `Warning` or above until
+    /// utilisation drops below this fraction. Sitting strictly below `warning_threshold`,
+    /// this stops a value that hovers around the warning line from flapping between
+    /// `Warning` and `Ok` on every tick.
+    pub warning_clear_threshold: f64,
     /// Once breached, a limit clears only when utilisation drops below this fraction.
     /// Sitting strictly between `warning_threshold` and 1, this stops a value that
     /// hovers around the breach line from flapping between `Breach` and a lower state
@@ -153,18 +158,23 @@ impl LimitsConfig {
         if let Some(var_99) = self.var_99 {
             positive("var_99", var_99)?;
         }
-        if !self.warning_threshold.is_finite() || !self.clear_threshold.is_finite() {
+        if !self.warning_clear_threshold.is_finite()
+            || !self.warning_threshold.is_finite()
+            || !self.clear_threshold.is_finite()
+        {
             return Err(LimitsConfigError::Invalid(
-                "warning_threshold and clear_threshold must be finite".into(),
+                "warning_clear_threshold, warning_threshold and clear_threshold must be finite"
+                    .into(),
             ));
         }
-        if !(0.0 < self.warning_threshold
+        if !(0.0 < self.warning_clear_threshold
+            && self.warning_clear_threshold < self.warning_threshold
             && self.warning_threshold < self.clear_threshold
             && self.clear_threshold < 1.0)
         {
             return Err(LimitsConfigError::Invalid(format!(
-                "thresholds must satisfy 0 < warning_threshold ({}) < clear_threshold ({}) < 1",
-                self.warning_threshold, self.clear_threshold
+                "thresholds must satisfy 0 < warning_clear_threshold ({}) < warning_threshold ({}) < clear_threshold ({}) < 1",
+                self.warning_clear_threshold, self.warning_threshold, self.clear_threshold
             )));
         }
         Ok(())
@@ -190,6 +200,7 @@ mod tests {
 
     fn valid_toml() -> &'static str {
         r"
+            warning_clear_threshold = 0.75
             warning_threshold = 0.8
             clear_threshold = 0.95
             var_99 = 50000
@@ -252,6 +263,16 @@ mod tests {
     #[test]
     fn warning_threshold_at_or_above_one_is_rejected() {
         let text = valid_toml().replace("warning_threshold = 0.8", "warning_threshold = 1.0");
+        let err = LimitsConfig::from_toml_str(&text).unwrap_err();
+        assert!(matches!(err, LimitsConfigError::Invalid(_)));
+    }
+
+    #[test]
+    fn warning_clear_threshold_at_or_above_warning_threshold_is_rejected() {
+        let text = valid_toml().replace(
+            "warning_clear_threshold = 0.75",
+            "warning_clear_threshold = 0.8",
+        );
         let err = LimitsConfig::from_toml_str(&text).unwrap_err();
         assert!(matches!(err, LimitsConfigError::Invalid(_)));
     }

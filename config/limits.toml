@@ -6,6 +6,10 @@
 
 # Utilisation at or above this fraction of a limit is a warning.
 warning_threshold = 0.8
+# Once a limit reaches Warning or above, it stays there until utilisation drops below
+# this fraction, so a value that hovers around the warning line does not flap in and out
+# of Warning.
+warning_clear_threshold = 0.75
 # Once breached, a limit clears only when utilisation drops below this fraction, so a
 # value that hovers around the breach line does not flap in and out of Breach.
 clear_threshold = 0.95
@@ -17,7 +21,7 @@ var_99 = 2000000
 # Directional exposure: the dollar P&L of a 1 % move in every underlying together. The
 # sample book's static stock (500 SPY, 300 AAPL) alone carries about $490,000 of dollar
 # delta, so this limit is deliberately tight: it is in breach from the open of every
-# session, the demo's headline alert.
+# session and never clears, the demo's one permanent headline alert.
 dollar_delta = 550000
 # Hedging cost in a fast market: how fast dollar delta itself moves on a 1 % move. Set
 # above the observed session peak (about 6,500), reserved for a real gamma spike.
@@ -37,12 +41,16 @@ gross_exposure = 2700000
 max_concentration = 0.55
 
 # Per-underlying |dollar delta|, with a default and optional per-symbol overrides. The
-# default covers AAPL and TSLA, whose peaks stay under 115,000. MSFT and SPY carry much
+# default covers AAPL and NVDA, whose peaks stay under 90,000. MSFT and SPY carry much
 # larger positions (a straddle and a stock-plus-option book) and need a higher ceiling of
-# their own; NVDA's short straddle stays well under the default even at its noisiest.
+# their own. TSLA gets the demo's dynamic limit: its bull call spread's dollar delta
+# swings between roughly $48,000 and $111,000 a session as spot moves relative to the two
+# strikes, so a $74,000 ceiling is crossed and cleared several times a session (found by
+# `tune_limits`'s grid search: every one of the 10 tuning sessions lands 1-3 entries into
+# Warning or Breach, most with at least one clear back to Ok).
 [underlying_dollar_delta]
 default = 150000
 [underlying_dollar_delta.overrides]
 MSFT = 500000
 SPY = 1000000
-NVDA = 70000
+TSLA = 74000
