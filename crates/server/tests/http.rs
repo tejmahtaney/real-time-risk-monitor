@@ -14,17 +14,21 @@ use support::{get, json_body, json_request, test_router};
 
 #[tokio::test]
 async fn health_reports_ok() {
-    let response = test_router().oneshot(get("/api/health")).await.unwrap();
+    let (router, _dir) = test_router();
+    let response = router.oneshot(get("/api/health")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = json_body(response).await;
     assert_eq!(body["status"], "ok");
     assert!(body["version"].is_string());
     assert!(body["connected_ws_clients"].is_number());
+    assert!(body["dropped_records"].is_number());
+    assert_eq!(body["storage_warning"], false);
 }
 
 #[tokio::test]
 async fn positions_lists_the_starting_book() {
-    let response = test_router().oneshot(get("/api/positions")).await.unwrap();
+    let (router, _dir) = test_router();
+    let response = router.oneshot(get("/api/positions")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = json_body(response).await;
     let positions = body.as_array().unwrap();
@@ -33,7 +37,7 @@ async fn positions_lists_the_starting_book() {
 
 #[tokio::test]
 async fn greeks_and_risk_summary_and_pnl_and_alerts_respond() {
-    let router = test_router();
+    let (router, _dir) = test_router();
 
     let response = router.clone().oneshot(get("/api/greeks")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -63,7 +67,7 @@ async fn greeks_and_risk_summary_and_pnl_and_alerts_respond() {
 
 #[tokio::test]
 async fn history_returns_points() {
-    let router = test_router();
+    let (router, _dir) = test_router();
 
     // Give the fixture's 20 ms interval a moment to produce a few ticks.
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -79,7 +83,7 @@ async fn history_returns_points() {
 
 #[tokio::test]
 async fn adding_and_removing_a_position_round_trips() {
-    let router = test_router();
+    let (router, _dir) = test_router();
 
     let new_position = json!({
         "id": "aapl-stock",
@@ -129,7 +133,7 @@ async fn adding_and_removing_a_position_round_trips() {
 
 #[tokio::test]
 async fn control_pauses_and_resumes() {
-    let router = test_router();
+    let (router, _dir) = test_router();
 
     let response = router
         .clone()
@@ -155,7 +159,8 @@ async fn control_pauses_and_resumes() {
 
 #[tokio::test]
 async fn control_rejects_a_bad_speed_with_a_400_and_the_error_shape() {
-    let response = test_router()
+    let (router, _dir) = test_router();
+    let response = router
         .oneshot(json_request(
             "POST",
             "/api/control",
@@ -171,7 +176,8 @@ async fn control_rejects_a_bad_speed_with_a_400_and_the_error_shape() {
 
 #[tokio::test]
 async fn removing_an_unknown_position_is_a_404_with_the_error_shape() {
-    let response = test_router()
+    let (router, _dir) = test_router();
+    let response = router
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -194,7 +200,8 @@ async fn cors_allows_the_configured_origin() {
         .header("origin", "http://localhost:5173")
         .body(Body::empty())
         .unwrap();
-    let response = test_router().oneshot(request).await.unwrap();
+    let (router, _dir) = test_router();
+    let response = router.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert!(
         response

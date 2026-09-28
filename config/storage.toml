@@ -1,0 +1,15 @@
+# Local storage settings (Part 13). Nothing under the storage root is ever deleted
+# automatically; the app only warns once usage crosses warn_fraction of max_bytes.
+
+# Which book a new session starts from: "last" reads portfolios/current.json if it
+# exists (falling back to the sample CSV otherwise), "sample" always starts from
+# data/sample_portfolio.csv, or name a file under portfolios/versions/ to start from a
+# specific saved version.
+start_portfolio = "last"
+
+# Soft ceiling on the storage folder's total size, in bytes. 20 GiB.
+max_bytes = 21474836480
+
+# Fraction of max_bytes at or above which the size-monitor task logs a warning and sets
+# the warning flag on /api/health and /api/storage.
+warn_fraction = 0.8

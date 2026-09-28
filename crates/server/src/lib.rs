@@ -7,11 +7,15 @@ mod config;
 mod error;
 mod routes;
 mod state;
+mod storage_config;
+mod storage_routes;
+mod validate;
 mod ws;
 
 pub use config::{ConfigError, ServerConfig};
 pub use error::ApiError;
 pub use state::AppState;
+pub use storage_config::{ConfigError as StorageConfigError, StartPortfolio, StorageConfig};
 
 use axum::Router;
 

@@ -19,7 +19,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::error::ApiError;
 use crate::state::AppState;
-use crate::ws;
+use crate::{storage_routes, ws};
 
 /// The maximum size of a request body this server accepts, in bytes. Every route here
 /// takes a small JSON body at most.
@@ -50,6 +50,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/control", post(control))
         .route("/api/history", get(history))
         .route("/ws", get(ws::handler))
+        .merge(storage_routes::router())
         .with_state(state)
         .layer(TraceLayer::new_for_http())
         .layer(cors)
@@ -69,6 +70,11 @@ struct HealthResponse {
     sim_time: DateTime<Utc>,
     last_tick_age_ms: i64,
     connected_ws_clients: usize,
+    /// Records dropped because the session recorder's channel was full, cumulative for
+    /// this run.
+    dropped_records: u64,
+    /// Set once storage usage crosses `storage.toml`'s `warn_fraction`.
+    storage_warning: bool,
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
@@ -80,6 +86,10 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         sim_time: snapshot.sim_time,
         last_tick_age_ms: (Utc::now() - snapshot.wall_time).num_milliseconds(),
         connected_ws_clients: state.ws_clients.load(std::sync::atomic::Ordering::Relaxed),
+        dropped_records: state.engine.dropped_records(),
+        storage_warning: state
+            .storage_warning
+            .load(std::sync::atomic::Ordering::Relaxed),
     })
 }
 
@@ -150,9 +160,13 @@ async fn add_position(
         .await??;
     match reply {
         EngineReply::Added(row) => Ok(Json(*row)),
-        EngineReply::Ack | EngineReply::Removed(_) | EngineReply::History(_) => Err(
-            ApiError::EngineUnavailable("unexpected reply from the engine".to_owned()),
-        ),
+        EngineReply::Ack
+        | EngineReply::Removed(_)
+        | EngineReply::History(_)
+        | EngineReply::Specs(_)
+        | EngineReply::Loaded(_) => Err(ApiError::EngineUnavailable(
+            "unexpected reply from the engine".to_owned(),
+        )),
     }
 }
 
@@ -167,9 +181,13 @@ async fn remove_position(
         .await??;
     match reply {
         EngineReply::Removed(_) => Ok(StatusCode::NO_CONTENT),
-        EngineReply::Ack | EngineReply::Added(_) | EngineReply::History(_) => Err(
-            ApiError::EngineUnavailable("unexpected reply from the engine".to_owned()),
-        ),
+        EngineReply::Ack
+        | EngineReply::Added(_)
+        | EngineReply::History(_)
+        | EngineReply::Specs(_)
+        | EngineReply::Loaded(_) => Err(ApiError::EngineUnavailable(
+            "unexpected reply from the engine".to_owned(),
+        )),
     }
 }
 
@@ -191,9 +209,13 @@ async fn history(
         .await??;
     match reply {
         EngineReply::History(points) => Ok(Json(points)),
-        EngineReply::Ack | EngineReply::Added(_) | EngineReply::Removed(_) => Err(
-            ApiError::EngineUnavailable("unexpected reply from the engine".to_owned()),
-        ),
+        EngineReply::Ack
+        | EngineReply::Added(_)
+        | EngineReply::Removed(_)
+        | EngineReply::Specs(_)
+        | EngineReply::Loaded(_) => Err(ApiError::EngineUnavailable(
+            "unexpected reply from the engine".to_owned(),
+        )),
     }
 }
 

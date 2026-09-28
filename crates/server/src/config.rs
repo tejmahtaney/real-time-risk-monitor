@@ -32,6 +32,8 @@ pub struct ServerConfig {
     pub simulation_config_path: PathBuf,
     /// Path to `config/limits.toml`.
     pub limits_config_path: PathBuf,
+    /// Path to `config/storage.toml`.
+    pub storage_config_path: PathBuf,
     /// Path to the starting portfolio CSV.
     pub portfolio_path: PathBuf,
     /// Capacity of the engine's history ring buffer, in points.

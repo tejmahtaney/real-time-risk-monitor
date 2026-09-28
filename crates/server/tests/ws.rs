@@ -86,7 +86,7 @@ fn tight_limits() -> LimitsConfig {
 
 #[tokio::test]
 async fn hello_then_snapshot_then_a_newer_snapshot_on_tick() {
-    let router = support::test_router_with(generous_limits(), Duration::from_millis(20));
+    let (router, _dir) = support::test_router_with(generous_limits(), Duration::from_millis(20));
     let (ws_url, _http_base, shutdown) = spawn_test_server(router).await;
 
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -121,7 +121,7 @@ async fn hello_then_snapshot_then_a_newer_snapshot_on_tick() {
 /// client that never reads another frame after the handshake.
 #[tokio::test]
 async fn an_idle_websocket_client_does_not_stop_the_server_responding() {
-    let router = support::test_router_with(generous_limits(), Duration::from_millis(2));
+    let (router, _dir) = support::test_router_with(generous_limits(), Duration::from_millis(2));
     let (ws_url, http_base, shutdown) = spawn_test_server(router).await;
 
     let (_idle_ws, _) = connect_async(&ws_url).await.unwrap();
@@ -150,7 +150,7 @@ async fn an_idle_websocket_client_does_not_stop_the_server_responding() {
 
 #[tokio::test]
 async fn throttling_caps_the_snapshot_rate() {
-    let router = support::test_router_with(generous_limits(), Duration::from_millis(5));
+    let (router, _dir) = support::test_router_with(generous_limits(), Duration::from_millis(5));
     let (ws_url, _http_base, shutdown) = spawn_test_server(router).await;
 
     let (mut ws, _) = connect_async(&ws_url).await.unwrap();
@@ -189,7 +189,7 @@ async fn throttling_caps_the_snapshot_rate() {
 
 #[tokio::test]
 async fn an_alert_reaches_every_connected_client() {
-    let router = support::test_router_with(tight_limits(), Duration::from_millis(20));
+    let (router, _dir) = support::test_router_with(tight_limits(), Duration::from_millis(20));
     let (ws_url, http_base, shutdown) = spawn_test_server(router).await;
 
     let (mut ws_a, _) = connect_async(&ws_url).await.unwrap();

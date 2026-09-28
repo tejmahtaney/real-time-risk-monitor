@@ -3,7 +3,7 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use engine::{DomainError, EngineCommandError, EngineError, PortfolioError};
+use engine::{DomainError, EngineCommandError, EngineError, PortfolioError, StorageError};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -21,6 +21,10 @@ pub enum ApiError {
     /// The engine is not ready to answer: its channel closed. 503.
     #[error("{0}")]
     EngineUnavailable(String),
+    /// A storage read or write failed for a reason other than a bad id (see
+    /// `Validation`) or a missing file (see `NotFound`). 503.
+    #[error("{0}")]
+    Storage(String),
 }
 
 #[derive(Serialize)]
@@ -40,6 +44,7 @@ impl ApiError {
             Self::Validation(_) => "validation_error",
             Self::NotFound(_) => "not_found",
             Self::EngineUnavailable(_) => "engine_unavailable",
+            Self::Storage(_) => "storage_error",
         }
     }
 
@@ -47,7 +52,7 @@ impl ApiError {
         match self {
             Self::Validation(_) => StatusCode::BAD_REQUEST,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
-            Self::EngineUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::EngineUnavailable(_) | Self::Storage(_) => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 }
@@ -92,6 +97,29 @@ impl From<EngineCommandError> for ApiError {
 
 impl From<DomainError> for ApiError {
     fn from(err: DomainError) -> Self {
+        Self::Validation(err.to_string())
+    }
+}
+
+impl From<StorageError> for ApiError {
+    fn from(err: StorageError) -> Self {
+        match &err {
+            StorageError::UnsafePath(_) => Self::Validation(err.to_string()),
+            StorageError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+                Self::NotFound(err.to_string())
+            }
+            StorageError::Io { .. }
+            | StorageError::Json { .. }
+            | StorageError::RepoRootNotFound(_) => Self::Storage(err.to_string()),
+        }
+    }
+}
+
+impl From<PortfolioError> for ApiError {
+    fn from(err: PortfolioError) -> Self {
+        // Reached only when a route parses a version file's CSV directly (outside any
+        // `EngineCommand`, so `From<EngineCommandError>` above does not apply) — a bad
+        // file on disk reads like a bad request.
         Self::Validation(err.to_string())
     }
 }

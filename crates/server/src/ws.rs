@@ -465,6 +465,7 @@ mod tests {
             wall_time: Utc.with_ymd_and_hms(2026, 9, 28, 14, 30, 0).unwrap(),
             sim_time: Utc.with_ymd_and_hms(2026, 9, 28, 14, 30, 0).unwrap(),
             session_date: date,
+            step_kind: engine::StepKind::Intraday,
             market: BTreeMap::new(),
             positions: Vec::new(),
             summary: RiskSummary::default(),

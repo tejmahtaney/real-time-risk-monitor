@@ -1,12 +1,13 @@
 //! Shared application state.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::time::Instant;
 
-use engine::EngineHandle;
+use engine::{EngineHandle, StorageRoot};
 
 use crate::config::ServerConfig;
+use crate::storage_config::StorageConfig;
 
 /// State shared across every axum handler.
 #[derive(Clone)]
@@ -15,6 +16,14 @@ pub struct AppState {
     pub engine: EngineHandle,
     /// Resolved server configuration.
     pub config: Arc<ServerConfig>,
+    /// Resolved storage configuration.
+    pub storage_config: Arc<StorageConfig>,
+    /// The storage root every session, portfolio and market-data file lives under.
+    pub storage_root: StorageRoot,
+    /// Set by the background size monitor once usage crosses
+    /// `storage_config.warn_fraction` of `storage_config.max_bytes`. Surfaced on
+    /// `/api/health` and `/api/storage`.
+    pub storage_warning: Arc<AtomicBool>,
     /// When the server process started, for `/api/health`'s uptime.
     pub started_at: Instant,
     /// Real milliseconds between engine ticks, from `config/simulation.toml`. Sent in

@@ -23,7 +23,8 @@ pub use snapshot::{FeedStatus, HistoryPoint, RiskSnapshot, SymbolSnapshot};
 // direct dependencies of its own, keeping the dependency direction in CLAUDE.md intact
 // (`server` depends on `engine` only).
 pub use domain::{
-    Clock, DomainError, FixedClock, InstrumentKind, Position, PositionId, SimClock, Symbol,
+    Clock, DomainError, FixedClock, InstrumentKind, Position, PositionId, SimClock, StepKind,
+    Symbol,
 };
 pub use marketdata::{
     AlphaVantageSource, Archive, CalibrationError, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL,

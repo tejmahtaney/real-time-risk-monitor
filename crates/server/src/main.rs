@@ -1,16 +1,16 @@
 //! The `risk-monitor` binary: starts the server. Only this binary may use `anyhow`.
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use engine::{
     AlphaVantageSource, Archive, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL, Engine, GbmSimulator,
-    HistoryLoader, LimitsConfig, MarketConfig, SimClock, SimulationConfig, StorageRoot,
-    SystemClock, calibrate, load_csv,
+    HistoryLoader, LimitsConfig, MarketConfig, PositionSpec, SimClock, SimulationConfig,
+    StorageRoot, SystemClock, calibrate, load_csv,
 };
-use server::{AppState, ServerConfig, build_router};
+use server::{AppState, ServerConfig, StartPortfolio, StorageConfig, build_router};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
@@ -31,34 +31,18 @@ async fn main() -> anyhow::Result<()> {
     let sim_config = SimulationConfig::load(&config.simulation_config_path)
         .context("loading simulation config")?;
     let limits = LimitsConfig::load(&config.limits_config_path).context("loading limits config")?;
-
-    let api_key = std::env::var("ALPHA_VANTAGE_API_KEY")
-        .ok()
-        .filter(|key| !key.is_empty());
-    let source = match api_key {
-        Some(key) => Some(
-            AlphaVantageSource::new(key, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL)
-                .context("building the Alpha Vantage client")?,
-        ),
-        None => None,
-    };
-    let loader = HistoryLoader::<AlphaVantageSource>::new(
-        Archive::new(StorageRoot::at(&config.storage_dir)),
-        "data/fallback",
-        market.cache_max_age_hours,
-        source,
-        Box::new(SystemClock),
+    let storage_config = Arc::new(
+        StorageConfig::load(&config.storage_config_path).context("loading storage config")?,
     );
-    let histories = loader
-        .load_history(&market.symbols, market.data_mode)
-        .await
-        .context("loading market history")?;
-    let seed = calibrate(&histories, &market).context("calibrating seed")?;
+    let storage_root = StorageRoot::at(&config.storage_dir);
+
+    let seed = load_seed(&market, &storage_root).await?;
 
     let start = sim_config.start_time(&seed);
     let clock = SimClock::new(start, sim_config.speed).context("building the simulated clock")?;
     let feed = GbmSimulator::new(&seed, &sim_config).context("building the price simulator")?;
-    let specs = load_csv(&config.portfolio_path).context("loading the starting portfolio")?;
+    let specs = starting_specs(&config, &storage_config, &storage_root)
+        .context("loading the starting portfolio")?;
 
     let engine = Engine::new(
         clock,
@@ -68,15 +52,51 @@ async fn main() -> anyhow::Result<()> {
         limits,
         Box::new(SystemClock),
         config.history_capacity,
+        sim_config.seed,
     )
     .context("building the engine")?;
 
+    // The two pieces of one-time startup I/O session construction used to do itself:
+    // copy this session's config files, and save the (possibly just-loaded) starting
+    // book as the automatic `session-start` version. Neither the engine struct nor its
+    // tick-loop task ever touches disk — see `engine::recorder`'s doc comment.
+    engine::copy_session_config(
+        &storage_root,
+        engine.session_id(),
+        &[
+            config.market_config_path.as_path(),
+            config.simulation_config_path.as_path(),
+            config.limits_config_path.as_path(),
+            config.storage_config_path.as_path(),
+            config.portfolio_path.as_path(),
+        ],
+    )
+    .context("copying this session's config files")?;
+    save_session_start_version(&storage_root, &engine.active_specs())
+        .context("saving the automatic session-start portfolio version")?;
+
     let shutdown = CancellationToken::new();
-    let handle = engine.spawn(sim_config.tick_interval(), shutdown.clone());
+    let (handle, engine_task) = engine.spawn(
+        sim_config.tick_interval(),
+        storage_root.clone(),
+        shutdown.clone(),
+    );
+
+    let storage_warning = Arc::new(AtomicBool::new(false));
+    tokio::spawn(monitor_storage_usage(
+        storage_root.clone(),
+        storage_config.max_bytes,
+        storage_config.warn_fraction,
+        storage_warning.clone(),
+        shutdown.clone(),
+    ));
 
     let app_state = AppState {
         engine: handle,
         config: config.clone(),
+        storage_config,
+        storage_root,
+        storage_warning,
         started_at: Instant::now(),
         tick_interval_ms: sim_config.tick_interval_ms,
         ws_clients: Arc::new(AtomicUsize::new(0)),
@@ -94,7 +114,120 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("serving")?;
 
+    // Graceful shutdown above only means axum stopped accepting new work; the engine
+    // task (and, inside it, the session recorder) reacts to the same cancellation
+    // independently. Awaiting it here is what actually makes "stop the engine, drain,
+    // flush, write the final meta.json, then exit" happen in that order before the
+    // process ends.
+    if let Err(err) = engine_task.await {
+        tracing::error!(error = %err, "the engine task panicked during shutdown");
+    }
+
     Ok(())
+}
+
+/// Fetches (or reads from the archive/fallback) and calibrates the market seed data.
+async fn load_seed(
+    market: &engine::MarketConfig,
+    storage_root: &StorageRoot,
+) -> anyhow::Result<engine::SeedData> {
+    let api_key = std::env::var("ALPHA_VANTAGE_API_KEY")
+        .ok()
+        .filter(|key| !key.is_empty());
+    let source = match api_key {
+        Some(key) => Some(
+            AlphaVantageSource::new(key, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL)
+                .context("building the Alpha Vantage client")?,
+        ),
+        None => None,
+    };
+    let loader = HistoryLoader::<AlphaVantageSource>::new(
+        Archive::new(storage_root.clone()),
+        "data/fallback",
+        market.cache_max_age_hours,
+        source,
+        Box::new(SystemClock),
+    );
+    let histories = loader
+        .load_history(&market.symbols, market.data_mode)
+        .await
+        .context("loading market history")?;
+    calibrate(&histories, market).context("calibrating seed")
+}
+
+/// Resolves the starting portfolio specs per `storage_config.start_portfolio`.
+fn starting_specs(
+    config: &ServerConfig,
+    storage_config: &StorageConfig,
+    storage_root: &StorageRoot,
+) -> anyhow::Result<Vec<PositionSpec>> {
+    match &storage_config.start_portfolio {
+        StartPortfolio::Sample => {
+            Ok(load_csv(&config.portfolio_path).context("loading the sample portfolio")?)
+        }
+        StartPortfolio::Last => {
+            let current = storage_root
+                .join(&["portfolios", "current.json"])
+                .context("building the portfolios/current.json path")?;
+            if current.exists() {
+                let positions: Vec<engine::Position> =
+                    engine::read_json(&current).context("reading portfolios/current.json")?;
+                Ok(positions.iter().map(engine::to_spec).collect())
+            } else {
+                Ok(load_csv(&config.portfolio_path).context("loading the sample portfolio")?)
+            }
+        }
+        StartPortfolio::Version(file) => {
+            let path = storage_root
+                .join(&["portfolios", "versions", file])
+                .context("building the version path")?;
+            Ok(load_csv(&path).context("loading the starting portfolio version")?)
+        }
+    }
+}
+
+/// Writes the starting book as the automatic `<start>-session-start.csv` version, the
+/// same operation `POST /api/portfolio/versions` performs, done once at startup instead
+/// of via a request.
+fn save_session_start_version(
+    storage_root: &StorageRoot,
+    specs: &[PositionSpec],
+) -> anyhow::Result<()> {
+    let bytes = engine::to_csv_bytes(specs)?;
+    let dir = storage_root.subdir(&["portfolios", "versions"])?;
+    engine::write_bytes_new(&dir, "session-start", "csv", chrono::Utc::now(), &bytes)?;
+    Ok(())
+}
+
+/// Runs until `shutdown` fires. Every minute, measures usage by top-level folder;
+/// above `warn_fraction` of `max_bytes`, logs a warning and sets `warning`. Never
+/// deletes anything — only measures and flags.
+async fn monitor_storage_usage(
+    root: StorageRoot,
+    max_bytes: u64,
+    warn_fraction: f64,
+    warning: Arc<AtomicBool>,
+    shutdown: CancellationToken,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    loop {
+        tokio::select! {
+            () = shutdown.cancelled() => break,
+            _ = interval.tick() => {
+                match engine::usage_by_folder(&root) {
+                    Ok(usage) => {
+                        let total: u64 = usage.values().sum();
+                        let over = (total as f64) >= (max_bytes as f64) * warn_fraction;
+                        warning.store(over, Ordering::Relaxed);
+                        if over {
+                            tracing::warn!(total, max_bytes, "storage usage above warn_fraction");
+                        }
+                    }
+                    Err(err) => tracing::error!(error = %err, "failed to measure storage usage"),
+                }
+            }
+        }
+    }
 }
 
 /// Resolves on Ctrl-C or, on Unix, `SIGTERM` (which Docker sends on shutdown), then

@@ -18,6 +18,7 @@ cors_origins = ["http://localhost:5173"]
 market_config_path = "config/market.toml"
 simulation_config_path = "config/simulation.toml"
 limits_config_path = "config/limits.toml"
+storage_config_path = "config/storage.toml"
 portfolio_path = "data/sample_portfolio.csv"
 
 # Capacity of the engine's history ring buffer (points, not bytes). 2,400 is 10 minutes

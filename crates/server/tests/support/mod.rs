@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -22,11 +22,18 @@ use axum::http::Request;
 use chrono::{TimeZone, Utc};
 use engine::{
     DataSource, Engine, FixedClock, GbmSimulator, InstrumentKind, LimitsConfig, PositionId,
-    PositionSpec, SeedData, SimClock, SimulationConfig, Symbol, SymbolSeed, VolProcessConfig,
+    PositionSpec, SeedData, SimClock, SimulationConfig, StorageRoot, Symbol, SymbolSeed,
+    VolProcessConfig,
 };
 use serde_json::Value;
-use server::{AppState, ServerConfig, build_router};
+use server::{AppState, ServerConfig, StartPortfolio, StorageConfig, build_router};
 use tokio_util::sync::CancellationToken;
+
+/// The RNG seed passed to `Engine::new` by every fixture here — distinct from
+/// `sim_config().seed`, since production code passes the same field for both
+/// purposes but the two are conceptually different (see `engine::Engine::new`'s doc
+/// comment).
+pub const RNG_SEED: u64 = 42;
 
 pub fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -102,23 +109,48 @@ pub fn server_config() -> ServerConfig {
         market_config_path: repo_root().join("config/market.toml"),
         simulation_config_path: repo_root().join("config/simulation.toml"),
         limits_config_path: repo_root().join("config/limits.toml"),
+        storage_config_path: repo_root().join("config/storage.toml"),
         portfolio_path: repo_root().join("data/sample_portfolio.csv"),
         history_capacity: 2_400,
     }
 }
 
+pub fn storage_config() -> StorageConfig {
+    StorageConfig {
+        start_portfolio: StartPortfolio::Sample,
+        max_bytes: 21_474_836_480,
+        warn_fraction: 0.8,
+    }
+}
+
+/// A `StorageRoot` inside a fresh temp directory, per CLAUDE.md's "tests never touch
+/// the real storage folder." The returned `TempDir` guard must be kept alive (bind it,
+/// even to `_dir`, never `_`) for as long as anything might still write to the root —
+/// in particular a spawned engine's session recorder task, which keeps writing after
+/// `test_router_with` returns.
+pub fn temp_storage() -> (tempfile::TempDir, StorageRoot) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = StorageRoot::at(dir.path());
+    (dir, root)
+}
+
 /// Builds a fresh router over a freshly spawned, fast fixture engine, using the real
 /// `config/limits.toml` and a 20 ms tick interval. Use [`test_router_with`] directly
 /// when a test needs its own `LimitsConfig` or tick rate (deterministically triggering
-/// an alert, or controlling how fast snapshots change).
-pub fn test_router() -> Router {
+/// an alert, or controlling how fast snapshots change). Returns the `TempDir` guard the
+/// caller must keep alive for the router's whole lifetime.
+pub fn test_router() -> (Router, tempfile::TempDir) {
     let limits = LimitsConfig::load(&repo_root().join("config/limits.toml")).unwrap();
     test_router_with(limits, Duration::from_millis(20))
 }
 
 /// Builds a fresh router over a freshly spawned fixture engine with a caller-chosen
-/// `LimitsConfig` and tick interval.
-pub fn test_router_with(limits: LimitsConfig, tick_interval: Duration) -> Router {
+/// `LimitsConfig` and tick interval, and its own temp storage root. Returns the
+/// `TempDir` guard the caller must keep alive for the router's whole lifetime.
+pub fn test_router_with(
+    limits: LimitsConfig,
+    tick_interval: Duration,
+) -> (Router, tempfile::TempDir) {
     let seed = seed_data();
     let config = sim_config();
     let feed = GbmSimulator::new(&seed, &config).unwrap();
@@ -131,18 +163,27 @@ pub fn test_router_with(limits: LimitsConfig, tick_interval: Duration) -> Router
         limits,
         Box::new(FixedClock::new(start())),
         2_400,
+        RNG_SEED,
     )
     .unwrap();
-    let handle = engine.spawn(tick_interval, CancellationToken::new());
+    let (dir, storage_root) = temp_storage();
+    let (handle, _join) = engine.spawn(
+        tick_interval,
+        storage_root.clone(),
+        CancellationToken::new(),
+    );
     let state = AppState {
         engine: handle,
         config: Arc::new(server_config()),
+        storage_config: Arc::new(storage_config()),
+        storage_root,
+        storage_warning: Arc::new(AtomicBool::new(false)),
         started_at: Instant::now(),
         #[allow(clippy::cast_possible_truncation)]
         tick_interval_ms: tick_interval.as_millis() as u64,
         ws_clients: Arc::new(AtomicUsize::new(0)),
     };
-    build_router(state)
+    (build_router(state), dir)
 }
 
 pub async fn json_body(response: axum::response::Response) -> Value {
