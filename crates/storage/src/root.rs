@@ -102,7 +102,16 @@ fn is_workspace_root(dir: &Path) -> bool {
 }
 
 /// Rejects a path part that could escape the folder it is joined onto.
-pub(crate) fn check_part(part: &str) -> Result<(), StorageError> {
+///
+/// A part is unsafe when it is empty, absolute, `.` or `..`, or holds a separator or
+/// NUL. Used by [`StorageRoot::join`]/[`StorageRoot::subdir`] and reused directly by
+/// `server` to validate every session id and filename taken from a URL before it ever
+/// reaches disk.
+///
+/// # Errors
+///
+/// [`StorageError::UnsafePath`] when `part` is unsafe.
+pub fn check_part(part: &str) -> Result<(), StorageError> {
     let bad = part.is_empty()
         || part == "."
         || part == ".."
@@ -114,6 +123,32 @@ pub(crate) fn check_part(part: &str) -> Result<(), StorageError> {
         Err(StorageError::UnsafePath(part.to_string()))
     } else {
         Ok(())
+    }
+}
+
+/// Turns arbitrary text into a safe file stem: ASCII alphanumerics are kept, any run of
+/// anything else collapses to one `-`, and the result is trimmed of leading and
+/// trailing `-`. An empty or all-punctuation input becomes `"version"`. The result
+/// always passes [`check_part`].
+pub fn slugify(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut last_was_dash = false;
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_was_dash = false;
+        } else if !last_was_dash && !out.is_empty() {
+            out.push('-');
+            last_was_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        "version".to_string()
+    } else {
+        out
     }
 }
 
@@ -184,5 +219,33 @@ mod tests {
         let made = root.subdir(&["market-data", "SPY"]).unwrap();
         assert!(made.is_dir());
         assert!(made.starts_with(root.path()));
+    }
+
+    #[test]
+    fn slugify_keeps_alphanumerics_and_collapses_the_rest() {
+        assert_eq!(slugify("My Book v2!"), "my-book-v2");
+        assert_eq!(slugify("  leading and trailing  "), "leading-and-trailing");
+        assert_eq!(slugify("a---b"), "a-b");
+    }
+
+    #[test]
+    fn slugify_of_nothing_useful_is_version() {
+        assert_eq!(slugify(""), "version");
+        assert_eq!(slugify("!!!"), "version");
+        assert_eq!(slugify("../.."), "version");
+    }
+
+    #[test]
+    fn every_slugify_output_passes_check_part() {
+        for input in [
+            "My Book v2!",
+            "",
+            "!!!",
+            "../..",
+            "a/b\\c\0d",
+            "already-safe",
+        ] {
+            assert!(check_part(&slugify(input)).is_ok(), "{input:?}");
+        }
     }
 }

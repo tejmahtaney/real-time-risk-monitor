@@ -108,19 +108,41 @@ pub fn write_json_new<T: Serialize>(
     now: DateTime<Utc>,
     value: &T,
 ) -> Result<PathBuf, StorageError> {
-    check_part(stem)?;
-    let stamp = timestamp_name(now);
     let bytes = to_bytes(dir, value)?;
+    write_bytes_new(dir, stem, "json", now, &bytes)
+}
+
+/// Writes `bytes` to a new file `<UTC timestamp>-<stem>.<ext>` in `dir` and returns its
+/// path.
+///
+/// Same never-overwrite, same-second clash retry (`_02`, `_03`, ...) and fsync rules as
+/// [`write_json_new`], which delegates here. The folder must already exist. Used
+/// directly for non-JSON payloads, such as portfolio version CSVs.
+///
+/// # Errors
+///
+/// [`StorageError::UnsafePath`] for a bad stem or extension and [`StorageError::Io`] for
+/// any file system failure.
+pub fn write_bytes_new(
+    dir: &Path,
+    stem: &str,
+    ext: &str,
+    now: DateTime<Utc>,
+    bytes: &[u8],
+) -> Result<PathBuf, StorageError> {
+    check_part(stem)?;
+    check_part(ext)?;
+    let stamp = timestamp_name(now);
     for attempt in 1..=MAX_NAME_ATTEMPTS {
         let name = if attempt == 1 {
-            format!("{stamp}-{stem}.json")
+            format!("{stamp}-{stem}.{ext}")
         } else {
-            format!("{stamp}-{stem}_{attempt:02}.json")
+            format!("{stamp}-{stem}_{attempt:02}.{ext}")
         };
         let path = dir.join(name);
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut file) => {
-                let written = file.write_all(&bytes).and_then(|()| file.sync_all());
+                let written = file.write_all(bytes).and_then(|()| file.sync_all());
                 if let Err(source) = written {
                     let _ = fs::remove_file(&path);
                     return Err(StorageError::Io {
@@ -183,6 +205,42 @@ pub fn list(dir: &Path) -> Result<Vec<PathBuf>, StorageError> {
     }
     files.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
     Ok(files)
+}
+
+/// The sub-folders of `dir`, sorted by name.
+///
+/// Hidden folders (leading `.`) are left out. A folder that does not exist gives an
+/// empty list, matching [`list`].
+///
+/// # Errors
+///
+/// [`StorageError::Io`] when the folder exists but cannot be read.
+pub fn list_dirs(dir: &Path) -> Result<Vec<PathBuf>, StorageError> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => {
+            return Err(StorageError::Io {
+                action: "read folder",
+                path: dir.to_path_buf(),
+                source,
+            });
+        }
+    };
+    let mut dirs = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(StorageError::io("read folder", dir))?;
+        let hidden = entry.file_name().to_string_lossy().starts_with('.');
+        let is_dir = entry
+            .file_type()
+            .map_err(StorageError::io("stat", entry.path()))?
+            .is_dir();
+        if is_dir && !hidden {
+            dirs.push(entry.path());
+        }
+    }
+    dirs.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    Ok(dirs)
 }
 
 /// Reads and parses a JSON file.
@@ -343,6 +401,39 @@ mod tests {
     fn list_of_a_missing_folder_is_empty() {
         let dir = tempfile::tempdir().unwrap();
         assert!(list(&dir.path().join("nope")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn write_bytes_new_names_and_retries_like_write_json_new() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = write_bytes_new(dir.path(), "start", "csv", t(0), b"id,qty\n").unwrap();
+        let b = write_bytes_new(dir.path(), "start", "csv", t(0), b"id,qty\n1,2\n").unwrap();
+        let file = |p: &Path| p.file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(file(&a), "20260926T100000Z-start.csv");
+        assert_eq!(file(&b), "20260926T100000Z-start_02.csv");
+        assert_eq!(fs::read_to_string(&a).unwrap(), "id,qty\n");
+        assert_eq!(fs::read_to_string(&b).unwrap(), "id,qty\n1,2\n");
+    }
+
+    #[test]
+    fn list_dirs_sorts_by_name_and_skips_files_and_hidden_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["b", "a", ".hidden", "c"] {
+            fs::create_dir(dir.path().join(name)).unwrap();
+        }
+        fs::write(dir.path().join("not-a-dir.json"), "{}").unwrap();
+        let listed: Vec<String> = list_dirs(dir.path())
+            .unwrap()
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(listed, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn list_dirs_of_a_missing_folder_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(list_dirs(&dir.path().join("nope")).unwrap().is_empty());
     }
 
     #[test]
