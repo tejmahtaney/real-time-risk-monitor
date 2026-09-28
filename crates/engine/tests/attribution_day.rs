@@ -8,7 +8,7 @@ use marketdata::{
     AlphaVantageSource, Archive, DataMode, GbmSimulator, HistoryLoader, MarketConfig, PriceFeed,
     SimulationConfig, SystemClock, calibrate,
 };
-use portfolio::{PositionBook, load_csv, resolve};
+use portfolio::{PositionBook, PositionStatus, load_csv, resolve};
 use risk::{PnlAttributor, PnlBuckets};
 use storage::StorageRoot;
 
@@ -77,6 +77,7 @@ async fn attribution_over_a_full_session_stays_within_five_percent_residual() {
     attributor.on_tick(&book.value_all(&market_state, start), &opening_step);
 
     let mut steps = 0_u32;
+    let mut last_rows;
     loop {
         let step = clock.advance(sim_config.tick_interval());
         let tick = feed.step(&step).unwrap();
@@ -84,6 +85,7 @@ async fn attribution_over_a_full_session_stays_within_five_percent_residual() {
         book.settle_expired(step.to, &market_state);
         let rows = book.value_all(&market_state, step.to);
         attributor.on_tick(&rows, &step);
+        last_rows = rows;
 
         steps += 1;
         assert!(steps < 10_000, "the session never closed and rolled");
@@ -92,7 +94,22 @@ async fn attribution_over_a_full_session_stays_within_five_percent_residual() {
         }
     }
 
+    let expiring_call_status = last_rows
+        .iter()
+        .find(|row| row.id.as_str() == "spy-call-expiring")
+        .map(|row| row.status.clone())
+        .expect("spy-call-expiring should still be in the book");
+    assert_eq!(
+        expiring_call_status,
+        PositionStatus::Expired,
+        "spy-call-expiring should have settled by the end of the session"
+    );
+
     let report = attributor.report();
+    assert!(
+        report.previous_day.is_some(),
+        "previous_day should be populated after the overnight roll"
+    );
 
     let mut excluding_expiring_call = PnlBuckets::default();
     println!("per-position residual share (since start):");
