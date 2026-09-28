@@ -1,0 +1,48 @@
+# Risk limits (Part 10). Utilisation = |value| / limit, except the theta floor, which
+# compares against the day's decay cost, max(0, -theta). Tuned by
+# `cargo run -p engine --example tune_limits` against 10 headless sessions of seed 42
+# over the sample portfolio; see docs/PROGRESS.md Part 10 for the distributions and the
+# reasoning behind these numbers.
+
+# Utilisation at or above this fraction of a limit is a warning.
+warning_threshold = 0.8
+# Once breached, a limit clears only when utilisation drops below this fraction, so a
+# value that hovers around the breach line does not flap in and out of Breach.
+clear_threshold = 0.95
+
+# 99 % one-day Value at Risk. Parsed but not evaluated until Part 18.
+var_99 = 2000000
+
+[portfolio]
+# Directional exposure: the dollar P&L of a 1 % move in every underlying together. The
+# sample book's static stock (500 SPY, 300 AAPL) alone carries about $490,000 of dollar
+# delta, so this limit is deliberately tight: it is in breach from the open of every
+# session, the demo's headline alert.
+dollar_delta = 550000
+# Hedging cost in a fast market: how fast dollar delta itself moves on a 1 % move. Set
+# above the observed session peak (about 6,500), reserved for a real gamma spike.
+dollar_gamma_1pct = 9500
+# Exposure to implied vol moves, in dollars per vol point. Set above the observed peak
+# (about 1,550).
+vega = 2200
+# Daily time decay the book pays. Compared against max(0, -theta), so positive theta
+# never breaches this. Set above the spike seen when spy-call-expiring settles (about
+# 3,000), reserved for a bigger decay day.
+theta_floor = 4500
+# Total gross exposure, Σ|dollar delta| over underlyings. Set above the observed peak
+# (about 1,930,000).
+gross_exposure = 2700000
+# Concentration: the largest single underlying's share of gross exposure. SPY runs
+# 32-42 % of this book's exposure; set above that band.
+max_concentration = 0.55
+
+# Per-underlying |dollar delta|, with a default and optional per-symbol overrides. The
+# default covers AAPL and TSLA, whose peaks stay under 115,000. MSFT and SPY carry much
+# larger positions (a straddle and a stock-plus-option book) and need a higher ceiling of
+# their own; NVDA's short straddle stays well under the default even at its noisiest.
+[underlying_dollar_delta]
+default = 150000
+[underlying_dollar_delta.overrides]
+MSFT = 500000
+SPY = 1000000
+NVDA = 70000

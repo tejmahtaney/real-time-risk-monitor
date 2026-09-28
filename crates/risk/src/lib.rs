@@ -9,15 +9,23 @@
 //! running [`PnlReport`]: a Taylor decomposition of each tick's P&L into delta, gamma, vega,
 //! theta, rho, a higher-order term and a residual, per position, per underlying and for the
 //! portfolio, for today and since start.
+//!
+//! [`LimitMonitor`] evaluates a [`RiskSummary`] against a [`LimitsConfig`] on every tick,
+//! tracking each limit's utilisation, warning and breach state with hysteresis and raising
+//! an [`AlertEvent`] only when a state changes.
 
 #![warn(missing_docs)]
 
 mod aggregate;
 mod attributor;
+mod limits;
+mod monitor;
 mod pnl;
 mod summary;
 
 pub use aggregate::aggregate;
 pub use attributor::PnlAttributor;
+pub use limits::{LimitsConfig, LimitsConfigError, PortfolioLimits, UnderlyingDeltaLimit};
+pub use monitor::{AlertEvent, LimitKind, LimitMonitor, LimitState, LimitStatus, Scope};
 pub use pnl::{PnlBuckets, PnlLevel, PnlReport, PreviousDay};
 pub use summary::{Concentration, PortfolioTotals, RiskSummary, UnderlyingRisk};
