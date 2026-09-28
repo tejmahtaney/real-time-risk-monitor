@@ -1,0 +1,21 @@
+# Server settings (Part 11). Layered by figment: this file, then environment variables
+# prefixed RRM_, then a bare PORT for the port, which a later cloud move will need.
+
+# Reachable only from this machine. Only Docker overrides this, inside the container.
+host = "127.0.0.1"
+port = 8080
+
+# Runtime storage root. Overridden by RRM_STORAGE_DIR; also read directly by
+# storage::StorageRoot::resolve().
+storage_dir = "../storage"
+
+# Built frontend assets (served from Part 14 onwards; unused before then).
+static_dir = "frontend/dist"
+
+# Origins allowed by CORS. Vite's dev server.
+cors_origins = ["http://localhost:5173"]
+
+market_config_path = "config/market.toml"
+simulation_config_path = "config/simulation.toml"
+limits_config_path = "config/limits.toml"
+portfolio_path = "data/sample_portfolio.csv"

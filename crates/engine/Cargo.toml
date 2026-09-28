@@ -15,9 +15,14 @@ storage = { workspace = true }
 portfolio = { workspace = true }
 marketdata = { workspace = true }
 risk = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
 
 [dev-dependencies]
 approx.workspace = true
-chrono.workspace = true
 tempfile.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
