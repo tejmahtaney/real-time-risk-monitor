@@ -7,13 +7,13 @@
 
 use std::fmt;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::str::FromStr;
 
 use chrono::NaiveDate;
-use csv::{ReaderBuilder, StringRecord, Trim};
-use domain::{InstrumentKind, PositionId, Symbol};
+use csv::{ReaderBuilder, StringRecord, Trim, WriterBuilder};
+use domain::{Instrument, InstrumentKind, Position, PositionId, Symbol};
 use serde::{Deserialize, Serialize};
 
 use crate::error::PortfolioError;
@@ -198,6 +198,88 @@ pub fn load_csv(path: &Path) -> Result<Vec<PositionSpec>, PortfolioError> {
         message: e.to_string(),
     })?;
     parse_csv(file)
+}
+
+/// Builds a spec that round-trips a resolved position back to CSV exactly: strike as
+/// [`StrikeSpec::Absolute`], expiry as [`ExpirySpec::Date`], entry price and any IV
+/// override carried through explicitly rather than left blank, so a saved and reloaded
+/// version reproduces the same entry price and P&L basis.
+pub fn to_spec(position: &Position) -> PositionSpec {
+    let (strike, expiry) = match &position.instrument {
+        Instrument::Equity { .. } => (None, None),
+        Instrument::Option(contract) => (
+            Some(StrikeSpec::Absolute(contract.strike)),
+            Some(ExpirySpec::Date(contract.expiry)),
+        ),
+    };
+    PositionSpec {
+        id: position.id.clone(),
+        underlying: position.instrument.underlying().clone(),
+        kind: position.instrument.kind(),
+        strike,
+        expiry,
+        quantity: position.quantity,
+        entry_price: Some(position.entry_price),
+        iv: position.iv_override,
+    }
+}
+
+/// Writes `specs` as portfolio CSV, in [`COLUMNS`] order, using each field's [`Display`]
+/// impl. These are exactly the types [`parse_csv`] parses back, so this round-trips.
+///
+/// [`Display`]: std::fmt::Display
+///
+/// # Errors
+///
+/// [`PortfolioError::Csv`] when the underlying writer fails.
+pub fn write_csv<W: Write>(writer: W, specs: &[PositionSpec]) -> Result<(), PortfolioError> {
+    let mut wtr = WriterBuilder::new().from_writer(writer);
+    wtr.write_record(COLUMNS).map_err(|e| csv_write_error(&e))?;
+    for spec in specs {
+        wtr.write_record([
+            spec.id.as_str(),
+            spec.underlying.as_str(),
+            kind_str(spec.kind),
+            &spec.strike.map(|s| s.to_string()).unwrap_or_default(),
+            &spec.expiry.map(|e| e.to_string()).unwrap_or_default(),
+            &spec.quantity.to_string(),
+            &spec.entry_price.map(|p| p.to_string()).unwrap_or_default(),
+            &spec.iv.map(|v| v.to_string()).unwrap_or_default(),
+        ])
+        .map_err(|e| csv_write_error(&e))?;
+    }
+    wtr.flush().map_err(|e| PortfolioError::Io {
+        path: "<csv writer>".to_owned(),
+        message: e.to_string(),
+    })
+}
+
+/// [`write_csv`] into an in-memory buffer, for callers that need bytes to write to
+/// storage rather than a stream to write to directly.
+///
+/// # Errors
+///
+/// As [`write_csv`].
+pub fn to_csv_bytes(specs: &[PositionSpec]) -> Result<Vec<u8>, PortfolioError> {
+    let mut buf = Vec::new();
+    write_csv(&mut buf, specs)?;
+    Ok(buf)
+}
+
+fn kind_str(kind: InstrumentKind) -> &'static str {
+    match kind {
+        InstrumentKind::Equity => "equity",
+        InstrumentKind::Call => "call",
+        InstrumentKind::Put => "put",
+    }
+}
+
+fn csv_write_error(e: &csv::Error) -> PortfolioError {
+    PortfolioError::Csv {
+        line: 0,
+        column: "(row)".to_owned(),
+        message: e.to_string(),
+    }
 }
 
 /// Parses portfolio CSV from any reader.
@@ -553,6 +635,84 @@ mod tests {
     #[test]
     fn empty_file_gives_no_specs() {
         assert_eq!(parse("").unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn to_spec_uses_absolute_strike_and_date_expiry() {
+        let expiry = NaiveDate::from_ymd_opt(2026, 10, 16).unwrap();
+        let call = domain::OptionContract::new(
+            Symbol::new("AAPL").unwrap(),
+            domain::OptionType::Call,
+            230.0,
+            expiry,
+        )
+        .unwrap();
+        let position = Position::new(
+            PositionId::new("call-1").unwrap(),
+            Instrument::Option(call),
+            -3.0,
+            4.25,
+            Some(0.3),
+        )
+        .unwrap();
+        let spec = to_spec(&position);
+        assert_eq!(spec.id.as_str(), "call-1");
+        assert_eq!(spec.strike, Some(StrikeSpec::Absolute(230.0)));
+        assert_eq!(spec.expiry, Some(ExpirySpec::Date(expiry)));
+        assert_relative_eq!(spec.quantity, -3.0);
+        assert_eq!(spec.entry_price, Some(4.25));
+        assert_eq!(spec.iv, Some(0.3));
+    }
+
+    #[test]
+    fn write_csv_round_trips_through_parse_csv() {
+        let expiry = NaiveDate::from_ymd_opt(2026, 10, 16).unwrap();
+        let call = domain::OptionContract::new(
+            Symbol::new("AAPL").unwrap(),
+            domain::OptionType::Call,
+            230.0,
+            expiry,
+        )
+        .unwrap();
+        let put = domain::OptionContract::new(
+            Symbol::new("SPY").unwrap(),
+            domain::OptionType::Put,
+            600.0,
+            expiry,
+        )
+        .unwrap();
+        let positions = [
+            Position::new(
+                PositionId::new("stock").unwrap(),
+                Instrument::Equity {
+                    symbol: Symbol::new("SPY").unwrap(),
+                },
+                500.0,
+                771.35,
+                None,
+            )
+            .unwrap(),
+            Position::new(
+                PositionId::new("call").unwrap(),
+                Instrument::Option(call),
+                -3.0,
+                4.25,
+                Some(0.3),
+            )
+            .unwrap(),
+            Position::new(
+                PositionId::new("put").unwrap(),
+                Instrument::Option(put),
+                5.0,
+                12.0,
+                None,
+            )
+            .unwrap(),
+        ];
+        let specs: Vec<PositionSpec> = positions.iter().map(to_spec).collect();
+        let bytes = to_csv_bytes(&specs).unwrap();
+        let round_tripped = parse_csv(bytes.as_slice()).unwrap();
+        assert_eq!(round_tripped, specs);
     }
 
     #[test]

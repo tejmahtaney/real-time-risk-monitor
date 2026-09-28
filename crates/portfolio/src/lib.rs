@@ -16,4 +16,6 @@ pub use book::PositionBook;
 pub use error::PortfolioError;
 pub use resolve::{resolve, resolve_expiry, round_strike};
 pub use risk::{PositionRisk, PositionStatus, ReportingGreeks, Settlement, SettlementEvent};
-pub use spec::{ExpirySpec, PositionSpec, StrikeSpec, load_csv, parse_csv};
+pub use spec::{
+    ExpirySpec, PositionSpec, StrikeSpec, load_csv, parse_csv, to_csv_bytes, to_spec, write_csv,
+};
