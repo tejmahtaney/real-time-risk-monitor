@@ -2,14 +2,14 @@
 
 use std::time::Duration;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{Method, StatusCode};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use engine::{
-    AlertEvent, Concentration, EngineCommand, EngineReply, LimitStatus, PnlReport, PortfolioTotals,
-    PositionId, PositionRisk, PositionSpec, UnderlyingRisk,
+    AlertEvent, Concentration, EngineCommand, EngineReply, HistoryPoint, LimitStatus, PnlReport,
+    PortfolioTotals, PositionId, PositionRisk, PositionSpec, UnderlyingRisk,
 };
 use serde::{Deserialize, Serialize};
 use tower_http::cors::{Any, CorsLayer};
@@ -19,6 +19,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::error::ApiError;
 use crate::state::AppState;
+use crate::ws;
 
 /// The maximum size of a request body this server accepts, in bytes. Every route here
 /// takes a small JSON body at most.
@@ -47,6 +48,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/pnl", get(pnl))
         .route("/api/alerts", get(alerts))
         .route("/api/control", post(control))
+        .route("/api/history", get(history))
+        .route("/ws", get(ws::handler))
         .with_state(state)
         .layer(TraceLayer::new_for_http())
         .layer(cors)
@@ -65,6 +68,7 @@ struct HealthResponse {
     uptime_seconds: u64,
     sim_time: DateTime<Utc>,
     last_tick_age_ms: i64,
+    connected_ws_clients: usize,
 }
 
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
@@ -75,6 +79,7 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         uptime_seconds: state.started_at.elapsed().as_secs(),
         sim_time: snapshot.sim_time,
         last_tick_age_ms: (Utc::now() - snapshot.wall_time).num_milliseconds(),
+        connected_ws_clients: state.ws_clients.load(std::sync::atomic::Ordering::Relaxed),
     })
 }
 
@@ -145,9 +150,9 @@ async fn add_position(
         .await??;
     match reply {
         EngineReply::Added(row) => Ok(Json(*row)),
-        EngineReply::Ack | EngineReply::Removed(_) => Err(ApiError::EngineUnavailable(
-            "unexpected reply from the engine".to_owned(),
-        )),
+        EngineReply::Ack | EngineReply::Removed(_) | EngineReply::History(_) => Err(
+            ApiError::EngineUnavailable("unexpected reply from the engine".to_owned()),
+        ),
     }
 }
 
@@ -162,9 +167,33 @@ async fn remove_position(
         .await??;
     match reply {
         EngineReply::Removed(_) => Ok(StatusCode::NO_CONTENT),
-        EngineReply::Ack | EngineReply::Added(_) => Err(ApiError::EngineUnavailable(
-            "unexpected reply from the engine".to_owned(),
-        )),
+        EngineReply::Ack | EngineReply::Added(_) | EngineReply::History(_) => Err(
+            ApiError::EngineUnavailable("unexpected reply from the engine".to_owned()),
+        ),
+    }
+}
+
+/// `GET /api/history` query parameters.
+#[derive(Debug, Deserialize)]
+struct HistoryQuery {
+    since: Option<u64>,
+}
+
+async fn history(
+    State(state): State<AppState>,
+    Query(params): Query<HistoryQuery>,
+) -> Result<Json<Vec<HistoryPoint>>, ApiError> {
+    let reply = state
+        .engine
+        .send(EngineCommand::GetHistory {
+            since: params.since,
+        })
+        .await??;
+    match reply {
+        EngineReply::History(points) => Ok(Json(points)),
+        EngineReply::Ack | EngineReply::Added(_) | EngineReply::Removed(_) => Err(
+            ApiError::EngineUnavailable("unexpected reply from the engine".to_owned()),
+        ),
     }
 }
 

@@ -43,6 +43,15 @@ impl EngineHandle {
         self.alerts.subscribe()
     }
 
+    /// A fresh clone of the snapshot `watch::Receiver`, for a caller (a WebSocket
+    /// client task) that wants to await `changed()` independently of every other
+    /// subscriber. A `watch` channel holds exactly one value, so a receiver that falls
+    /// behind never queues: it just sees the latest value whenever it next looks. See
+    /// `server::ws` for the streaming layer this exists for.
+    pub fn subscribe_snapshots(&self) -> watch::Receiver<Arc<RiskSnapshot>> {
+        self.snapshots.clone()
+    }
+
     /// Sends a command and awaits its reply.
     ///
     /// The outer `Result` is [`EngineError::Gone`] when the engine task has stopped and

@@ -28,6 +28,9 @@ thiserror = { workspace = true }
 [dev-dependencies]
 tower = { workspace = true, features = ["util"] }
 tempfile.workspace = true
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+reqwest.workspace = true
 
 [lib]
 name = "server"

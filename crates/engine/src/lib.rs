@@ -13,7 +13,7 @@ pub use command::{EngineCommand, EngineCommandError, EngineReply, EngineRequest}
 pub use engine::Engine;
 pub use error::EngineError;
 pub use handle::EngineHandle;
-pub use snapshot::{FeedStatus, RiskSnapshot, SymbolSnapshot};
+pub use snapshot::{FeedStatus, HistoryPoint, RiskSnapshot, SymbolSnapshot};
 
 // Re-exported so `server` can name every type it needs without adding these crates as
 // direct dependencies of its own, keeping the dependency direction in CLAUDE.md intact
@@ -29,6 +29,7 @@ pub use marketdata::{
 pub use portfolio::{PortfolioError, PositionRisk, PositionSpec, PositionStatus, load_csv};
 pub use risk::{
     AlertEvent, Concentration, LimitKind, LimitState, LimitStatus, LimitsConfig, LimitsConfigError,
-    PnlReport, PortfolioTotals, RiskSummary, Scope, UnderlyingRisk,
+    PnlBuckets, PnlLevel, PnlReport, PortfolioLimits, PortfolioTotals, RiskSummary, Scope,
+    UnderlyingDeltaLimit, UnderlyingRisk,
 };
 pub use storage::{StorageError, StorageRoot};

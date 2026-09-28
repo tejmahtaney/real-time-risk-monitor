@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, NaiveDate, Utc};
 use domain::Symbol;
 use portfolio::PositionRisk;
-use risk::{AlertEvent, LimitStatus, PnlReport, RiskSummary};
+use risk::{AlertEvent, LimitStatus, PnlBuckets, PnlReport, RiskSummary};
 use serde::{Deserialize, Serialize};
 
 /// Whether the feed is producing usable data.
@@ -57,11 +57,14 @@ pub struct RiskSnapshot {
     pub summary: RiskSummary,
     /// Running P&L attribution.
     pub pnl: PnlReport,
-    /// The limits currently in `Warning` or `Breach`. `risk::LimitMonitor` only tracks
-    /// state for limits that have left `Ok` at least once, so this is also the full set
-    /// of statuses worth surfacing — a limit that has never left `Ok` carries no
-    /// information beyond "fine".
+    /// The limits currently in `Warning` or `Breach`. `risk::LimitMonitor::active()`
+    /// only tracks state for limits that have left `Ok` at least once, so this is a
+    /// strict subset of [`Self::limits`] — use that field for a limit that's still
+    /// comfortably `Ok` (a utilisation bar, say); use this one for an alerts pane.
     pub active_alerts: Vec<LimitStatus>,
+    /// Every configured limit's current status, including ones still `Ok` — one entry
+    /// per limit and scope, every tick, from `risk::LimitMonitor::statuses`.
+    pub limits: Vec<LimitStatus>,
     /// Up to the last 200 alert state-change events.
     pub alert_history: Vec<AlertEvent>,
     /// The clock's current speed multiplier.
@@ -73,4 +76,36 @@ pub struct RiskSnapshot {
     /// Microseconds spent computing this tick, measured with `Instant` around the whole
     /// eight-step cycle.
     pub compute_micros: u64,
+}
+
+/// One tick's worth of portfolio-level risk, kept in the engine's bounded history ring
+/// buffer for charting. A thin projection of [`RiskSnapshot`], not the whole thing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryPoint {
+    /// Same value as the [`RiskSnapshot`] this point was built from, so a client can
+    /// correlate history points with the `seq` it sees on live `snapshot` messages.
+    pub seq: u64,
+    /// Simulated time this point represents.
+    pub sim_time: DateTime<Utc>,
+    /// Portfolio net dollar delta at this tick.
+    pub dollar_delta: f64,
+    /// Portfolio dollar gamma 1 % at this tick.
+    pub dollar_gamma_1pct: f64,
+    /// Portfolio vega at this tick.
+    pub vega: f64,
+    /// Portfolio theta at this tick.
+    pub theta: f64,
+    /// Portfolio gross exposure at this tick.
+    pub gross_exposure: f64,
+    /// Portfolio market value at this tick.
+    pub market_value: f64,
+    /// The session-to-date P&L attribution buckets at this tick.
+    pub pnl_today: PnlBuckets,
+    /// The highest utilisation across every configured limit at this tick, `0.0` if
+    /// none are configured. Includes limits still `Ok`, unlike
+    /// [`RiskSnapshot::active_alerts`].
+    pub worst_limit_utilisation: f64,
+    /// Reserved for Part 18's `VaR` history; always `None` until then. Mirrors
+    /// `risk::LimitsConfig::var_99`'s type.
+    pub var_99: Option<f64>,
 }

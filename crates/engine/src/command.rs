@@ -5,6 +5,8 @@ use portfolio::{PortfolioError, PositionRisk, PositionSpec};
 use thiserror::Error;
 use tokio::sync::oneshot;
 
+use crate::snapshot::HistoryPoint;
+
 /// A command the engine task accepts over its `mpsc` channel.
 #[derive(Debug, Clone)]
 pub enum EngineCommand {
@@ -20,6 +22,12 @@ pub enum EngineCommand {
     AddPosition(PositionSpec),
     /// Remove a position from the book by id.
     RemovePosition(PositionId),
+    /// Returns history points with `seq` greater than `since`, or every point
+    /// currently held if `since` is `None`.
+    GetHistory {
+        /// Only points after this `seq`, or all of them if `None`.
+        since: Option<u64>,
+    },
 }
 
 /// Everything that can go wrong executing an [`EngineCommand`], returned through its
@@ -45,6 +53,8 @@ pub enum EngineReply {
     Added(Box<PositionRisk>),
     /// The position `RemovePosition` took out of the book.
     Removed(Box<Position>),
+    /// The reply to `GetHistory`, in ascending `seq` order.
+    History(Vec<HistoryPoint>),
 }
 
 /// One request sent down the engine's `mpsc::Sender<EngineRequest>`: a command plus a

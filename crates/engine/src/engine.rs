@@ -2,7 +2,7 @@
 //! snapshots. Nothing else touches the book, the feed or the clock, so there are no
 //! locks on the hot path.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use crate::command::{EngineCommand, EngineCommandError, EngineReply, EngineRequest};
 use crate::error::EngineError;
 use crate::handle::EngineHandle;
-use crate::snapshot::{FeedStatus, RiskSnapshot, SymbolSnapshot};
+use crate::snapshot::{FeedStatus, HistoryPoint, RiskSnapshot, SymbolSnapshot};
 
 /// Lower bound for [`EngineCommand::SetSpeed`], inclusive.
 const MIN_SPEED: f64 = 1.0;
@@ -42,6 +42,10 @@ pub struct Engine<F: PriceFeed> {
     /// Alert events from the most recent call to `tick`, drained by `spawn`'s loop onto
     /// the broadcast channel.
     new_alerts: Vec<AlertEvent>,
+    /// Bounded ring buffer of per-tick history points, oldest first, for charting.
+    history: VecDeque<HistoryPoint>,
+    /// Maximum number of points [`Self::history`] is allowed to hold.
+    history_capacity: usize,
 }
 
 impl<F: PriceFeed> Engine<F> {
@@ -56,7 +60,8 @@ impl<F: PriceFeed> Engine<F> {
     /// do (`SimClock::new(sim_config.start_time(&seed), sim_config.speed)?`), so clock
     /// construction and its own speed validation stay at the one call site that already
     /// does it. `wall_clock` supplies the real time stamped on `LimitMonitor`'s alert
-    /// events; production code passes a real clock, tests a fixed one.
+    /// events; production code passes a real clock, tests a fixed one. `history_capacity`
+    /// bounds the history ring buffer (see [`Self::history_since`]); `0` disables it.
     ///
     /// # Errors
     ///
@@ -70,6 +75,7 @@ impl<F: PriceFeed> Engine<F> {
         specs: &[PositionSpec],
         limits: LimitsConfig,
         wall_clock: Box<dyn Clock>,
+        history_capacity: usize,
     ) -> Result<Self, EngineError> {
         let started = Instant::now();
         let start = clock.now();
@@ -94,6 +100,7 @@ impl<F: PriceFeed> Engine<F> {
         let rows = book.value_all(&market, start);
         let summary = aggregate(&rows);
         let _events = monitor.evaluate(&summary, start);
+        let limit_statuses = monitor.statuses(&summary);
 
         let open_spots = session_open_spots(&market);
         let pnl = attributor.report();
@@ -113,12 +120,16 @@ impl<F: PriceFeed> Engine<F> {
             summary,
             pnl,
             active_alerts,
+            limit_statuses,
             alert_history,
             clock.speed(),
             clock.is_paused(),
             FeedStatus::Ok,
             compute_micros,
         );
+
+        let mut history = VecDeque::new();
+        push_history(&mut history, history_capacity, history_point(&snapshot));
 
         Ok(Self {
             clock,
@@ -131,6 +142,8 @@ impl<F: PriceFeed> Engine<F> {
             seq: 0,
             last_snapshot: Arc::new(snapshot),
             new_alerts: Vec::new(),
+            history,
+            history_capacity,
         })
     }
 
@@ -186,6 +199,7 @@ impl<F: PriceFeed> Engine<F> {
         let summary = aggregate(&rows);
         let events = self.monitor.evaluate(&summary, step.to);
         self.new_alerts.extend(events);
+        let limit_statuses = self.monitor.statuses(&summary);
 
         self.seq += 1;
         let pnl = self.attributor.report();
@@ -205,14 +219,30 @@ impl<F: PriceFeed> Engine<F> {
             summary,
             pnl,
             active_alerts,
+            limit_statuses,
             alert_history,
             self.clock.speed(),
             self.clock.is_paused(),
             feed_status,
             compute_micros,
         );
+        push_history(
+            &mut self.history,
+            self.history_capacity,
+            history_point(&snapshot),
+        );
         self.last_snapshot = Arc::new(snapshot);
         Ok(self.last_snapshot.clone())
+    }
+
+    /// Points with `seq` greater than `since`, in ascending `seq` order, or every
+    /// point currently held if `since` is `None`.
+    pub fn history_since(&self, since: Option<u64>) -> Vec<HistoryPoint> {
+        self.history
+            .iter()
+            .filter(|point| since.is_none_or(|s| point.seq > s))
+            .cloned()
+            .collect()
     }
 
     /// Applies one validated command, mutating engine state.
@@ -256,6 +286,9 @@ impl<F: PriceFeed> Engine<F> {
             EngineCommand::RemovePosition(id) => {
                 let removed = self.book.remove(&id)?;
                 Ok(EngineReply::Removed(Box::new(removed)))
+            }
+            EngineCommand::GetHistory { since } => {
+                Ok(EngineReply::History(self.history_since(since)))
             }
         }
     }
@@ -331,6 +364,7 @@ fn build_snapshot(
     summary: risk::RiskSummary,
     pnl: risk::PnlReport,
     active_alerts: Vec<LimitStatus>,
+    limits: Vec<LimitStatus>,
     alert_history: Vec<AlertEvent>,
     clock_speed: f64,
     paused: bool,
@@ -369,10 +403,46 @@ fn build_snapshot(
         summary,
         pnl,
         active_alerts,
+        limits,
         alert_history,
         clock_speed,
         paused,
         feed_status,
         compute_micros,
     }
+}
+
+/// Projects a [`RiskSnapshot`] down to the [`HistoryPoint`] kept in the history ring
+/// buffer.
+fn history_point(snapshot: &RiskSnapshot) -> HistoryPoint {
+    let worst_limit_utilisation = snapshot
+        .limits
+        .iter()
+        .map(|status| status.utilisation)
+        .fold(0.0_f64, f64::max);
+    HistoryPoint {
+        seq: snapshot.seq,
+        sim_time: snapshot.sim_time,
+        dollar_delta: snapshot.summary.totals.dollar_delta,
+        dollar_gamma_1pct: snapshot.summary.totals.dollar_gamma_1pct,
+        vega: snapshot.summary.totals.vega,
+        theta: snapshot.summary.totals.theta,
+        gross_exposure: snapshot.summary.totals.gross_exposure,
+        market_value: snapshot.summary.totals.market_value,
+        pnl_today: snapshot.pnl.portfolio.today,
+        worst_limit_utilisation,
+        var_99: None,
+    }
+}
+
+/// Appends `point` to `history`, evicting the oldest point first once `history` is at
+/// `capacity`. A `capacity` of `0` makes this a no-op, rather than panicking.
+fn push_history(history: &mut VecDeque<HistoryPoint>, capacity: usize, point: HistoryPoint) {
+    if capacity == 0 {
+        return;
+    }
+    if history.len() >= capacity {
+        history.pop_front();
+    }
+    history.push_back(point);
 }

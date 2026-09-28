@@ -7,6 +7,7 @@ mod config;
 mod error;
 mod routes;
 mod state;
+mod ws;
 
 pub use config::{ConfigError, ServerConfig};
 pub use error::ApiError;

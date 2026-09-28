@@ -1,6 +1,7 @@
 //! The `risk-monitor` binary: starts the server. Only this binary may use `anyhow`.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use std::time::Instant;
 
 use anyhow::Context;
@@ -59,8 +60,16 @@ async fn main() -> anyhow::Result<()> {
     let feed = GbmSimulator::new(&seed, &sim_config).context("building the price simulator")?;
     let specs = load_csv(&config.portfolio_path).context("loading the starting portfolio")?;
 
-    let engine = Engine::new(clock, &seed, feed, &specs, limits, Box::new(SystemClock))
-        .context("building the engine")?;
+    let engine = Engine::new(
+        clock,
+        &seed,
+        feed,
+        &specs,
+        limits,
+        Box::new(SystemClock),
+        config.history_capacity,
+    )
+    .context("building the engine")?;
 
     let shutdown = CancellationToken::new();
     let handle = engine.spawn(sim_config.tick_interval(), shutdown.clone());
@@ -69,6 +78,8 @@ async fn main() -> anyhow::Result<()> {
         engine: handle,
         config: config.clone(),
         started_at: Instant::now(),
+        tick_interval_ms: sim_config.tick_interval_ms,
+        ws_clients: Arc::new(AtomicUsize::new(0)),
     };
     let router = build_router(app_state);
 

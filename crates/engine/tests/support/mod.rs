@@ -151,6 +151,7 @@ pub fn build_engine() -> Engine<GbmSimulator> {
         &positions(),
         limits_config(),
         Box::new(FixedClock::new(start())),
+        100,
     )
     .unwrap()
 }
@@ -171,6 +172,7 @@ pub fn build_failing_engine() -> (Engine<FailingFeed>, Arc<AtomicBool>) {
         &positions(),
         limits_config(),
         Box::new(FixedClock::new(start())),
+        100,
     )
     .unwrap();
     (engine, fail)

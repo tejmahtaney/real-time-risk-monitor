@@ -184,6 +184,53 @@ impl LimitMonitor {
     /// state changed on this call. `sim_time` is stamped on each event; the wall time
     /// comes from this monitor's clock.
     pub fn evaluate(&mut self, summary: &RiskSummary, sim_time: DateTime<Utc>) -> Vec<AlertEvent> {
+        let statuses = self.build_statuses(summary);
+
+        let wall_time = self.clock.now();
+        let mut events = Vec::new();
+        for status in statuses {
+            let key = (status.name, status.scope.clone());
+            let previous = self.states.get(&key).copied().unwrap_or(LimitState::Ok);
+            if status.state != previous {
+                let event = AlertEvent {
+                    id: self.next_id,
+                    wall_time,
+                    sim_time,
+                    name: status.name,
+                    scope: status.scope.clone(),
+                    from: previous,
+                    to: status.state,
+                    value: status.value,
+                    limit: status.limit,
+                };
+                self.next_id += 1;
+                self.push_history(event.clone());
+                events.push(event);
+            }
+            self.states.insert(key.clone(), status.state);
+            if status.state == LimitState::Ok {
+                self.active.remove(&key);
+            } else {
+                self.active.insert(key, status);
+            }
+        }
+        events
+    }
+
+    /// Every configured limit's current status against `summary`, including ones
+    /// currently `Ok` — unlike [`Self::active`], which only ever holds non-`Ok`
+    /// limits. Read-only: does not affect hysteresis state, `active()` or `history()`
+    /// the way [`Self::evaluate`] does.
+    pub fn statuses(&self, summary: &RiskSummary) -> Vec<LimitStatus> {
+        self.build_statuses(summary)
+    }
+
+    /// Builds one [`LimitStatus`] per limit and scope, in a fixed order (the six
+    /// portfolio limits, then each underlying's dollar-delta limit), regardless of
+    /// state. Shared by [`Self::evaluate`] (which also tracks hysteresis, active
+    /// alerts and history from the result) and [`Self::statuses`] (a read-only view
+    /// for callers that just want every current utilisation, such as charting).
+    fn build_statuses(&self, summary: &RiskSummary) -> Vec<LimitStatus> {
         let totals = &summary.totals;
         let mut statuses = vec![
             self.status_for(
@@ -232,36 +279,7 @@ impl LimitMonitor {
                 limit,
             ));
         }
-
-        let wall_time = self.clock.now();
-        let mut events = Vec::new();
-        for status in statuses {
-            let key = (status.name, status.scope.clone());
-            let previous = self.states.get(&key).copied().unwrap_or(LimitState::Ok);
-            if status.state != previous {
-                let event = AlertEvent {
-                    id: self.next_id,
-                    wall_time,
-                    sim_time,
-                    name: status.name,
-                    scope: status.scope.clone(),
-                    from: previous,
-                    to: status.state,
-                    value: status.value,
-                    limit: status.limit,
-                };
-                self.next_id += 1;
-                self.push_history(event.clone());
-                events.push(event);
-            }
-            self.states.insert(key.clone(), status.state);
-            if status.state == LimitState::Ok {
-                self.active.remove(&key);
-            } else {
-                self.active.insert(key, status);
-            }
-        }
-        events
+        statuses
     }
 
     /// Builds the [`LimitStatus`] for one limit and scope, looking up its current state
@@ -542,5 +560,37 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, LimitKind::Concentration);
         assert_eq!(events[0].to, LimitState::Breach);
+    }
+
+    #[test]
+    fn statuses_includes_every_limit_even_ones_still_ok() {
+        let monitor = monitor();
+        let statuses = monitor.statuses(&summary_with_dollar_delta(50_000.0));
+        // Six portfolio limits and no underlyings in this summary.
+        assert_eq!(statuses.len(), 6);
+        assert!(
+            statuses.iter().all(|s| s.state == LimitState::Ok),
+            "nothing here should have left Ok"
+        );
+        let delta = statuses
+            .iter()
+            .find(|s| s.name == LimitKind::PortfolioDollarDelta)
+            .expect("portfolio dollar delta should be present even though it's Ok");
+        assert_relative_eq!(delta.utilisation, 0.5);
+    }
+
+    #[test]
+    fn statuses_reflects_hysteresis_state_after_evaluate() {
+        let mut monitor = monitor();
+        monitor.evaluate(&summary_with_dollar_delta(101_000.0), now());
+        // Dropping back under the raw breach line does not clear hysteresis, so
+        // `statuses` (called after `evaluate`) should still show `Breach`, matching
+        // what `active()` shows, not a bare recomputed `value.abs() / limit`.
+        let statuses = monitor.statuses(&summary_with_dollar_delta(97_000.0));
+        let delta = statuses
+            .iter()
+            .find(|s| s.name == LimitKind::PortfolioDollarDelta)
+            .expect("portfolio dollar delta should be present");
+        assert_eq!(delta.state, LimitState::Breach);
     }
 }

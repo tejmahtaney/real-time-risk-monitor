@@ -34,6 +34,8 @@ pub struct ServerConfig {
     pub limits_config_path: PathBuf,
     /// Path to the starting portfolio CSV.
     pub portfolio_path: PathBuf,
+    /// Capacity of the engine's history ring buffer, in points.
+    pub history_capacity: usize,
 }
 
 /// The server configuration could not be loaded.
