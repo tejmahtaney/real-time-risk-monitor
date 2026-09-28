@@ -21,7 +21,8 @@ async fn let_ticks_happen(count: u32, tick_interval: Duration) {
 async fn pause_stops_sim_time_and_resume_restarts_it() {
     let engine = support::build_engine();
     let tick_interval = Duration::from_millis(50);
-    let handle = engine.spawn(tick_interval, CancellationToken::new());
+    let (_dir, storage) = support::temp_storage();
+    let (handle, _join) = engine.spawn(tick_interval, storage, CancellationToken::new());
 
     let ack = handle.send(EngineCommand::Pause).await.unwrap().unwrap();
     assert!(matches!(ack, EngineReply::Ack));
@@ -47,7 +48,8 @@ async fn pause_stops_sim_time_and_resume_restarts_it() {
 async fn set_speed_changes_the_snapshot_and_bad_speeds_are_rejected() {
     let engine = support::build_engine();
     let tick_interval = Duration::from_millis(50);
-    let handle = engine.spawn(tick_interval, CancellationToken::new());
+    let (_dir, storage) = support::temp_storage();
+    let (handle, _join) = engine.spawn(tick_interval, storage, CancellationToken::new());
 
     let ack = handle
         .send(EngineCommand::SetSpeed(240.0))
@@ -71,7 +73,8 @@ async fn set_speed_changes_the_snapshot_and_bad_speeds_are_rejected() {
 async fn add_and_remove_positions() {
     let engine = support::build_engine();
     let tick_interval = Duration::from_millis(50);
-    let handle = engine.spawn(tick_interval, CancellationToken::new());
+    let (_dir, storage) = support::temp_storage();
+    let (handle, _join) = engine.spawn(tick_interval, storage, CancellationToken::new());
 
     let new_spec = engine::PositionSpec {
         id: engine::PositionId::new("aapl-stock").unwrap(),

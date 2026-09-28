@@ -138,6 +138,19 @@ pub fn limits_config() -> LimitsConfig {
     }
 }
 
+/// The RNG seed passed to `Engine::new` by every fixture here. A fixed literal, not
+/// `sim_config().seed`, so a test can tell the two "seed" concepts apart at a glance.
+pub const RNG_SEED: u64 = 42;
+
+/// A `StorageRoot` inside a fresh temp directory, per CLAUDE.md's "tests never touch
+/// the real storage folder" — the `TempDir` guard must outlive the root, so callers
+/// that spawn an engine should keep it alive for the test's duration.
+pub fn temp_storage() -> (tempfile::TempDir, engine::StorageRoot) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = engine::StorageRoot::at(dir.path());
+    (dir, root)
+}
+
 /// Builds the fixture engine over a real `GbmSimulator`.
 pub fn build_engine() -> Engine<GbmSimulator> {
     let seed = seed_data();
@@ -152,6 +165,7 @@ pub fn build_engine() -> Engine<GbmSimulator> {
         limits_config(),
         Box::new(FixedClock::new(start())),
         100,
+        RNG_SEED,
     )
     .unwrap()
 }
@@ -173,6 +187,7 @@ pub fn build_failing_engine() -> (Engine<FailingFeed>, Arc<AtomicBool>) {
         limits_config(),
         Box::new(FixedClock::new(start())),
         100,
+        RNG_SEED,
     )
     .unwrap();
     (engine, fail)

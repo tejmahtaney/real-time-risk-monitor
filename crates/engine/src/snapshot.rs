@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
-use domain::Symbol;
+use domain::{StepKind, Symbol};
 use portfolio::PositionRisk;
 use risk::{AlertEvent, LimitStatus, PnlBuckets, PnlReport, RiskSummary};
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,10 @@ pub struct RiskSnapshot {
     pub sim_time: DateTime<Utc>,
     /// The trading session this tick belongs to.
     pub session_date: NaiveDate,
+    /// Whether this tick ended inside the session, at the close, or jumped overnight.
+    /// The session recorder writes `closes/<date>.json` and a `daily-pnl.csv` row on
+    /// [`StepKind::Close`].
+    pub step_kind: StepKind,
     /// Market data per underlying, in symbol order.
     pub market: BTreeMap<Symbol, SymbolSnapshot>,
     /// Every position's valuation.

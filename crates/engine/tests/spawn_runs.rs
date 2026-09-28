@@ -13,7 +13,8 @@ async fn spawned_engine_produces_several_snapshots_and_stops_on_cancel() {
     let engine = support::build_engine();
     let tick_interval = Duration::from_millis(100);
     let shutdown = CancellationToken::new();
-    let handle = engine.spawn(tick_interval, shutdown.clone());
+    let (_dir, storage) = support::temp_storage();
+    let (handle, join) = engine.spawn(tick_interval, storage, shutdown.clone());
 
     let mut seen = std::collections::BTreeSet::new();
     seen.insert(handle.latest().seq);
@@ -28,10 +29,11 @@ async fn spawned_engine_produces_several_snapshots_and_stops_on_cancel() {
     );
 
     shutdown.cancel();
-    // Give the spawned task a chance to observe the cancellation and exit.
-    tokio::time::advance(tick_interval).await;
-    tokio::task::yield_now().await;
-    tokio::task::yield_now().await;
+    // The tick loop's JoinHandle resolves only once it has also drained and awaited
+    // the recorder task, so awaiting it directly (no timer involved, so this works
+    // fine under this test's paused Tokio clock) confirms the whole shutdown sequence
+    // completes.
+    join.await.expect("the engine task should not panic");
 
     let result = handle.send(EngineCommand::Pause).await;
     assert!(

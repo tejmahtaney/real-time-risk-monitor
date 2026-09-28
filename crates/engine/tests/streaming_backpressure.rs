@@ -22,7 +22,8 @@ fn median(samples: &[u64]) -> u64 {
 async fn an_unread_snapshot_receiver_does_not_slow_the_engine() {
     let engine = support::build_engine();
     let tick_interval = Duration::from_millis(10);
-    let handle = engine.spawn(tick_interval, CancellationToken::new());
+    let (_dir, storage) = support::temp_storage();
+    let (handle, _join) = engine.spawn(tick_interval, storage, CancellationToken::new());
 
     // Clone a receiver and never read from it again: exactly what an idle WebSocket
     // client's task would hold onto. The engine's publish side does not know or care

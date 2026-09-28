@@ -1,6 +1,7 @@
 //! The handle a caller (the server) uses to talk to a spawned engine.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 use risk::AlertEvent;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -16,6 +17,7 @@ pub struct EngineHandle {
     snapshots: watch::Receiver<Arc<RiskSnapshot>>,
     alerts: broadcast::Sender<AlertEvent>,
     requests: mpsc::Sender<EngineRequest>,
+    dropped_records: Arc<AtomicU64>,
 }
 
 impl EngineHandle {
@@ -25,12 +27,22 @@ impl EngineHandle {
         snapshots: watch::Receiver<Arc<RiskSnapshot>>,
         alerts: broadcast::Sender<AlertEvent>,
         requests: mpsc::Sender<EngineRequest>,
+        dropped_records: Arc<AtomicU64>,
     ) -> Self {
         Self {
             snapshots,
             alerts,
             requests,
+            dropped_records,
         }
+    }
+
+    /// Records dropped because the session recorder's channel was full, cumulative for
+    /// the life of this engine. Surfaced on `/api/health` and in the session's final
+    /// `meta.json`.
+    pub fn dropped_records(&self) -> u64 {
+        self.dropped_records
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The latest published snapshot. Never blocks; always returns immediately.

@@ -30,6 +30,7 @@ fn build_engine_with_history_capacity(capacity: usize) -> Engine<GbmSimulator> {
         support::limits_config(),
         Box::new(FixedClock::new(support::start())),
         capacity,
+        support::RNG_SEED,
     )
     .unwrap()
 }
@@ -71,7 +72,8 @@ fn history_since_excludes_points_at_or_before_the_given_seq() {
 async fn get_history_command_returns_points_through_a_spawned_handle() {
     let engine = support::build_engine();
     let tick_interval = Duration::from_millis(50);
-    let handle = engine.spawn(tick_interval, CancellationToken::new());
+    let (_dir, storage) = support::temp_storage();
+    let (handle, _join) = engine.spawn(tick_interval, storage, CancellationToken::new());
 
     for _ in 0..5 {
         tokio::time::advance(tick_interval).await;

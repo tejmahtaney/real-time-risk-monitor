@@ -6,11 +6,14 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use std::sync::atomic::AtomicU64;
+
 use chrono::Utc;
-use domain::{Clock, ClockStep, MarketState, SimClock, StepKind, Symbol, market_date};
+use domain::{Clock, ClockStep, MarketState, Position, SimClock, StepKind, Symbol, market_date};
 use marketdata::{PriceFeed, SeedData};
-use portfolio::{PortfolioError, PositionBook, PositionSpec, resolve};
+use portfolio::{PortfolioError, PositionBook, PositionSpec, resolve, to_spec};
 use risk::{AlertEvent, LimitMonitor, LimitStatus, LimitsConfig, PnlAttributor, aggregate};
+use storage::StorageRoot;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{Instant as TokioInstant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
@@ -18,6 +21,9 @@ use tokio_util::sync::CancellationToken;
 use crate::command::{EngineCommand, EngineCommandError, EngineReply, EngineRequest};
 use crate::error::EngineError;
 use crate::handle::EngineHandle;
+use crate::recorder::{
+    self, ControlAction, PositionChangeKind, RecorderRecord, SessionEvent, SessionMeta,
+};
 use crate::snapshot::{FeedStatus, HistoryPoint, RiskSnapshot, SymbolSnapshot};
 
 /// Lower bound for [`EngineCommand::SetSpeed`], inclusive.
@@ -46,6 +52,14 @@ pub struct Engine<F: PriceFeed> {
     history: VecDeque<HistoryPoint>,
     /// Maximum number of points [`Self::history`] is allowed to hold.
     history_capacity: usize,
+    /// This session's id: a UTC start time plus a short random suffix.
+    session_id: String,
+    /// This session's metadata, handed to the recorder task in [`Self::spawn`]. The
+    /// engine itself never writes it to disk — see [`crate::recorder`]'s doc comment.
+    session_meta: SessionMeta,
+    /// Records this tick or command produced, drained onto the recorder's channel by
+    /// [`Self::spawn`]'s loop after each `tick`/`apply` call.
+    pending_records: Vec<RecorderRecord>,
 }
 
 impl<F: PriceFeed> Engine<F> {
@@ -62,12 +76,23 @@ impl<F: PriceFeed> Engine<F> {
     /// does it. `wall_clock` supplies the real time stamped on `LimitMonitor`'s alert
     /// events; production code passes a real clock, tests a fixed one. `history_capacity`
     /// bounds the history ring buffer (see [`Self::history_since`]); `0` disables it.
+    /// `rng_seed` is `config/simulation.toml`'s RNG seed — a different thing from
+    /// `seed: &SeedData`, the calibrated *market* seed above — recorded in `meta.json`.
+    ///
+    /// This constructor performs no I/O: it computes this session's id and metadata
+    /// (see [`Self::session_id`]) but does not write them anywhere. [`Self::spawn`]
+    /// hands them to the recorder task, which does the actual writing — see
+    /// [`crate::recorder`]'s doc comment for why.
     ///
     /// # Errors
     ///
     /// [`EngineError::Calibration`] if the seed cannot build a market state,
     /// [`EngineError::Portfolio`] if the starting positions cannot be resolved or added
     /// to the book.
+    // Eight constructor parameters is over clippy's default of seven, but every one is
+    // a distinct, already-validated piece of state this type owns; grouping them into
+    // a builder or config struct would only move the same eight names one level down.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         clock: SimClock,
         seed: &SeedData,
@@ -76,6 +101,7 @@ impl<F: PriceFeed> Engine<F> {
         limits: LimitsConfig,
         wall_clock: Box<dyn Clock>,
         history_capacity: usize,
+        rng_seed: u64,
     ) -> Result<Self, EngineError> {
         let started = Instant::now();
         let start = clock.now();
@@ -83,7 +109,33 @@ impl<F: PriceFeed> Engine<F> {
 
         let market = seed.to_market_state(start)?;
         let positions = resolve(specs, &market, start)?;
-        let book = PositionBook::from_positions(positions)?;
+        let mut book = PositionBook::from_positions(positions)?;
+        // Settle anything already past its expiry before the very first valuation, so a
+        // restored book (e.g. `start_portfolio = "last"` loaded after the server was
+        // off overnight) never shows a stale, unsettled error row on tick 0. The
+        // recorder task does not exist yet at this point, so these settlements are
+        // logged but not written to events.jsonl — an accepted, documented edge case.
+        for event in book.settle_expired(start, &market) {
+            tracing::info!(id = %event.position_id, "settled an already-expired position at session start");
+        }
+
+        // The session's own start/end are real wall-clock times (when the server
+        // process actually started and stopped), not simulated market time — `start`
+        // above is the sim clock's opening instant and is unrelated. Read directly from
+        // `Utc::now()` rather than `wall_clock` (which a test may fix to a simulated
+        // date for deterministic alert timestamps), so this always matches the real
+        // time [`crate::recorder::run`] stamps on the session's final `meta.json`.
+        let session_start = Utc::now();
+        let session_id = recorder::new_session_id(session_start);
+        let session_meta = SessionMeta {
+            session_id: session_id.clone(),
+            start: session_start,
+            end: None,
+            seed: rng_seed,
+            speed: clock.speed(),
+            git_commit: recorder::git_commit(),
+            dropped_records: 0,
+        };
 
         let mut attributor = PnlAttributor::new(session_date);
         let opening_step = ClockStep {
@@ -144,7 +196,34 @@ impl<F: PriceFeed> Engine<F> {
             new_alerts: Vec::new(),
             history,
             history_capacity,
+            session_id,
+            session_meta,
+            pending_records: Vec::new(),
         })
+    }
+
+    /// This session's id: a UTC start time plus a short random suffix.
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// Positions currently in the book that have not settled.
+    ///
+    /// A settled option's cash is already paid out and its outcome is recorded in
+    /// `events.jsonl`, so it must never come back to life on a restart that resolves
+    /// the same book again — this is what "the book" means for
+    /// `portfolios/current.json` and a saved portfolio version.
+    pub fn active_positions(&self) -> Vec<Position> {
+        self.book
+            .iter()
+            .filter(|p| self.book.settlement(&p.id).is_none())
+            .cloned()
+            .collect()
+    }
+
+    /// [`Self::active_positions`], converted to [`PositionSpec`] via [`portfolio::to_spec`].
+    pub fn active_specs(&self) -> Vec<PositionSpec> {
+        self.active_positions().iter().map(to_spec).collect()
     }
 
     /// One full cycle: advance the clock, step the feed, settle expiries, value
@@ -193,11 +272,25 @@ impl<F: PriceFeed> Engine<F> {
             self.open_spots = session_open_spots(&self.market);
         }
 
-        self.book.settle_expired(step.to, &self.market);
+        let settlements = self.book.settle_expired(step.to, &self.market);
+        if !settlements.is_empty() {
+            for event in &settlements {
+                self.pending_records
+                    .push(RecorderRecord::Event(SessionEvent::Settlement(
+                        event.clone(),
+                    )));
+            }
+            self.pending_records
+                .push(RecorderRecord::CurrentPortfolio(self.active_positions()));
+        }
         let rows = self.book.value_all(&self.market, step.to);
         self.attributor.on_tick(&rows, &step);
         let summary = aggregate(&rows);
         let events = self.monitor.evaluate(&summary, step.to);
+        for event in &events {
+            self.pending_records
+                .push(RecorderRecord::Event(SessionEvent::Alert(event.clone())));
+        }
         self.new_alerts.extend(events);
         let limit_statuses = self.monitor.statuses(&summary);
 
@@ -226,12 +319,21 @@ impl<F: PriceFeed> Engine<F> {
             feed_status,
             compute_micros,
         );
-        push_history(
-            &mut self.history,
-            self.history_capacity,
-            history_point(&snapshot),
-        );
+        let point = history_point(&snapshot);
+        push_history(&mut self.history, self.history_capacity, point.clone());
+        self.pending_records.push(RecorderRecord::History(point));
+
         self.last_snapshot = Arc::new(snapshot);
+        if self.last_snapshot.step_kind == StepKind::Close {
+            self.pending_records.push(RecorderRecord::Close {
+                session_date: self.last_snapshot.session_date,
+                snapshot: self.last_snapshot.clone(),
+            });
+            self.pending_records.push(RecorderRecord::DailyPnl {
+                session_date: self.last_snapshot.session_date,
+                buckets: self.last_snapshot.pnl.portfolio.today,
+            });
+        }
         Ok(self.last_snapshot.clone())
     }
 
@@ -250,10 +352,12 @@ impl<F: PriceFeed> Engine<F> {
         match command {
             EngineCommand::Pause => {
                 self.clock.pause();
+                self.push_control(ControlAction::Pause);
                 Ok(EngineReply::Ack)
             }
             EngineCommand::Resume => {
                 self.clock.resume();
+                self.push_control(ControlAction::Resume);
                 Ok(EngineReply::Ack)
             }
             EngineCommand::SetSpeed(speed) => {
@@ -263,6 +367,7 @@ impl<F: PriceFeed> Engine<F> {
                 self.clock
                     .set_speed(speed)
                     .map_err(|_| EngineCommandError::InvalidSpeed(speed))?;
+                self.push_control(ControlAction::SetSpeed { speed });
                 Ok(EngineReply::Ack)
             }
             EngineCommand::AddPosition(spec) => {
@@ -281,16 +386,83 @@ impl<F: PriceFeed> Engine<F> {
                 let row = rows.into_iter().find(|r| r.id == spec.id).ok_or_else(|| {
                     EngineCommandError::Portfolio(PortfolioError::UnknownPosition(spec.id.clone()))
                 })?;
+                self.pending_records
+                    .push(RecorderRecord::Event(SessionEvent::PositionChange {
+                        wall_time: Utc::now(),
+                        sim_time: now,
+                        kind: PositionChangeKind::Added,
+                        position_id: spec.id.clone(),
+                    }));
+                self.pending_records
+                    .push(RecorderRecord::CurrentPortfolio(self.active_positions()));
                 Ok(EngineReply::Added(Box::new(row)))
             }
             EngineCommand::RemovePosition(id) => {
                 let removed = self.book.remove(&id)?;
+                self.pending_records
+                    .push(RecorderRecord::Event(SessionEvent::PositionChange {
+                        wall_time: Utc::now(),
+                        sim_time: self.clock.now(),
+                        kind: PositionChangeKind::Removed,
+                        position_id: id,
+                    }));
+                self.pending_records
+                    .push(RecorderRecord::CurrentPortfolio(self.active_positions()));
                 Ok(EngineReply::Removed(Box::new(removed)))
             }
             EngineCommand::GetHistory { since } => {
                 Ok(EngineReply::History(self.history_since(since)))
             }
+            EngineCommand::GetSpecs => Ok(EngineReply::Specs(self.active_specs())),
+            EngineCommand::LoadPortfolio { specs, source } => {
+                let now = self.clock.now();
+                let mut book = PositionBook::from_positions(resolve(&specs, &self.market, now)?)?;
+                let settlements = book.settle_expired(now, &self.market);
+                self.book = book;
+
+                // Rebase P&L attribution: the same zero-length-`ClockStep` trick
+                // `Engine::new` uses to seed the opening valuation, so the swap itself
+                // contributes no P&L and the very next real tick diffs cleanly against
+                // the newly loaded book.
+                self.attributor = PnlAttributor::new(self.last_snapshot.session_date);
+                let zero_step = ClockStep {
+                    from: now,
+                    to: now,
+                    trading_years: 0.0,
+                    calendar_years: 0.0,
+                    session_date: self.last_snapshot.session_date,
+                    kind: StepKind::Intraday,
+                };
+                self.attributor
+                    .on_tick(&self.book.value_all(&self.market, now), &zero_step);
+
+                let position_count = self.book.len();
+                self.pending_records
+                    .push(RecorderRecord::Event(SessionEvent::PortfolioLoad {
+                        wall_time: Utc::now(),
+                        sim_time: now,
+                        source,
+                        position_count,
+                    }));
+                for event in settlements {
+                    self.pending_records
+                        .push(RecorderRecord::Event(SessionEvent::Settlement(event)));
+                }
+                self.pending_records
+                    .push(RecorderRecord::CurrentPortfolio(self.active_positions()));
+                Ok(EngineReply::Loaded(position_count))
+            }
         }
+    }
+
+    /// Pushes a [`SessionEvent::Control`] record for the recorder.
+    fn push_control(&mut self, action: ControlAction) {
+        self.pending_records
+            .push(RecorderRecord::Event(SessionEvent::Control {
+                wall_time: Utc::now(),
+                sim_time: self.clock.now(),
+                action,
+            }));
     }
 
     /// Consumes the engine and spawns its tick loop on the current Tokio runtime.
@@ -303,7 +475,20 @@ impl<F: PriceFeed> Engine<F> {
     /// Inter-tick elapsed time is measured with `tokio::time::Instant`, not
     /// `std::time::Instant`, so that a paused Tokio clock (`#[tokio::test(start_paused =
     /// true)]` plus `tokio::time::advance`) drives `real_elapsed` correctly in tests.
-    pub fn spawn(mut self, tick_interval: Duration, shutdown: CancellationToken) -> EngineHandle
+    /// `storage` is used only to start the recorder task (see [`crate::recorder`]) —
+    /// the tick-loop task spawned here never touches it itself; every record it
+    /// produces is handed to the recorder over a channel with a non-blocking
+    /// `try_send`. Returns the handle callers use to talk to the engine, and the tick
+    /// loop's own `JoinHandle`, which resolves once `shutdown` is cancelled and the
+    /// recorder has finished draining, flushing and writing the final `meta.json` —
+    /// awaiting it is what makes "stop the engine, drain, flush, write the final
+    /// meta.json, then exit" actually happen in order.
+    pub fn spawn(
+        mut self,
+        tick_interval: Duration,
+        storage: StorageRoot,
+        shutdown: CancellationToken,
+    ) -> (EngineHandle, tokio::task::JoinHandle<()>)
     where
         F: Send + 'static,
     {
@@ -312,7 +497,17 @@ impl<F: PriceFeed> Engine<F> {
         let (request_tx, mut request_rx) = mpsc::channel::<EngineRequest>(32);
         let alert_tx_for_task = alert_tx.clone();
 
-        tokio::spawn(async move {
+        let (recorder_tx, recorder_rx) = mpsc::channel(recorder::RECORDER_CHANNEL_CAPACITY);
+        let dropped_records = Arc::new(AtomicU64::new(0));
+        let recorder_join = tokio::spawn(recorder::run(
+            recorder_rx,
+            storage,
+            self.session_meta.clone(),
+            dropped_records.clone(),
+        ));
+        let dropped_records_for_task = dropped_records.clone();
+
+        let engine_join = tokio::spawn(async move {
             let mut interval = tokio::time::interval(tick_interval);
             interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
             let mut last_tick_at = TokioInstant::now();
@@ -329,16 +524,38 @@ impl<F: PriceFeed> Engine<F> {
                         for event in std::mem::take(&mut self.new_alerts) {
                             let _ = alert_tx_for_task.send(event);
                         }
+                        send_pending_records(&mut self.pending_records, &recorder_tx, &dropped_records_for_task);
                     }
                     Some(request) = request_rx.recv() => {
                         let result = self.apply(request.command);
+                        send_pending_records(&mut self.pending_records, &recorder_tx, &dropped_records_for_task);
                         let _ = request.reply.send(result);
                     }
                 }
             }
+            drop(recorder_tx);
+            let _ = recorder_join.await;
         });
 
-        EngineHandle::new(snapshot_rx, alert_tx, request_tx)
+        (
+            EngineHandle::new(snapshot_rx, alert_tx, request_tx, dropped_records),
+            engine_join,
+        )
+    }
+}
+
+/// Drains `pending_records`, handing each to the recorder with a non-blocking
+/// `try_send`. A full channel counts as a dropped record and is otherwise ignored —
+/// this is the one place the engine task ever touches the recorder, and it never waits.
+fn send_pending_records(
+    pending_records: &mut Vec<RecorderRecord>,
+    recorder_tx: &mpsc::Sender<RecorderRecord>,
+    dropped_records: &Arc<AtomicU64>,
+) {
+    for record in pending_records.drain(..) {
+        if recorder_tx.try_send(record).is_err() {
+            dropped_records.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
@@ -398,6 +615,7 @@ fn build_snapshot(
         wall_time,
         sim_time: step.to,
         session_date: step.session_date,
+        step_kind: step.kind,
         market: market_snapshot,
         positions: rows,
         summary,

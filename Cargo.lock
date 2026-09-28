@@ -536,10 +536,13 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "chrono",
+ "csv",
  "domain",
  "marketdata",
  "portfolio",
  "pricing",
+ "rand 0.10.3",
+ "rand_chacha 0.10.0",
  "risk",
  "serde",
  "storage",
