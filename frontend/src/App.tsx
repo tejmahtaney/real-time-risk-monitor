@@ -1,8 +1,8 @@
 import { useEffect, type ReactElement } from 'react'
 
 import { startStream } from './api/stream'
+import { Dashboard } from './components/Dashboard'
 import { Header } from './components/Header'
-import { PlaceholderPanel } from './components/PlaceholderPanel'
 
 export function App(): ReactElement {
   useEffect(() => {
@@ -16,18 +16,7 @@ export function App(): ReactElement {
     <div className="flex min-h-screen flex-col">
       <Header />
       <main className="grid flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-3">
-        <PlaceholderPanel
-          title="Positions"
-          note="The positions table lands in Part 15."
-          className="lg:col-span-2"
-        />
-        <PlaceholderPanel title="Risk tiles" note="Limit-utilisation tiles land in Part 15." />
-        <PlaceholderPanel
-          title="Alerts"
-          note="The alerts pane lands in Part 15."
-          className="lg:col-span-2"
-        />
-        <PlaceholderPanel title="Charts" note="Greeks, allocation and P&L charts land in Part 16." />
+        <Dashboard />
       </main>
     </div>
   )

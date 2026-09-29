@@ -1,0 +1,402 @@
+import { useEffect, useRef, useState, type ReactElement } from 'react'
+
+import type { PositionRisk } from '../api/generated/PositionRisk'
+import { api, ApiError } from '../api/rest'
+import { formatCompactCurrency, formatCompactNumber, signColor } from '../lib/format'
+import {
+  groupPositions,
+  loadSortState,
+  saveSortState,
+  sortRows,
+  type SortColumn,
+  type SortState,
+} from '../lib/positionGroups'
+
+interface Column {
+  key: SortColumn
+  label: string
+  align?: 'left' | 'right'
+}
+
+const COLUMNS: Column[] = [
+  { key: 'description', label: 'Description', align: 'left' },
+  { key: 'quantity', label: 'Qty' },
+  { key: 'spot', label: 'Spot' },
+  { key: 'mark', label: 'Mark' },
+  { key: 'market_value', label: 'Mkt value' },
+  { key: 'unrealised_pnl', label: 'Unreal. P&L' },
+  { key: 'share_delta', label: 'Share Δ' },
+  { key: 'dollar_delta', label: '$ Δ' },
+  { key: 'share_gamma', label: 'Share Γ' },
+  { key: 'vega', label: 'Vega' },
+  { key: 'theta', label: 'Theta/day' },
+  { key: 'status', label: 'Status' },
+]
+
+const DEFAULT_SORT: SortState = { column: 'description', direction: 'asc' }
+
+function numberCell(value: number, formatter: (v: number) => string = formatCompactCurrency): string {
+  return formatter(value)
+}
+
+/** A flat key for one cell, used to remember its previous value across renders
+ * so a genuine change can be flashed green or red. */
+function cellKey(rowId: string, column: SortColumn): string {
+  return `${rowId}:${column}`
+}
+
+const NUMERIC_COLUMNS: SortColumn[] = [
+  'quantity',
+  'spot',
+  'mark',
+  'market_value',
+  'unrealised_pnl',
+  'share_delta',
+  'dollar_delta',
+  'share_gamma',
+  'vega',
+  'theta',
+]
+
+function cellValue(row: PositionRisk, column: SortColumn): number | string {
+  switch (column) {
+    case 'description':
+      return row.description
+    case 'quantity':
+      return row.quantity
+    case 'spot':
+      return row.spot
+    case 'mark':
+      return row.mark
+    case 'market_value':
+      return row.market_value
+    case 'unrealised_pnl':
+      return row.unrealised_pnl
+    case 'share_delta':
+      return row.reporting.share_delta
+    case 'dollar_delta':
+      return row.reporting.dollar_delta
+    case 'share_gamma':
+      return row.reporting.share_gamma
+    case 'vega':
+      return row.reporting.vega
+    case 'theta':
+      return row.reporting.theta
+    case 'status':
+      return row.status.state
+  }
+}
+
+/** Tracks the previous numeric value of every visible cell and returns a
+ * lookup of which cells should flash, and which colour, on this render.
+ * Cleared out again after {@link FLASH_MS}. */
+const FLASH_MS = 400
+
+function useCellFlashes(rows: PositionRisk[]): Map<string, 'up' | 'down'> {
+  const previous = useRef<Map<string, number>>(new Map())
+  const [flashes, setFlashes] = useState<Map<string, 'up' | 'down'>>(new Map())
+
+  useEffect(() => {
+    const next = new Map<string, 'up' | 'down'>()
+    for (const row of rows) {
+      for (const column of NUMERIC_COLUMNS) {
+        const key = cellKey(row.id, column)
+        const value = cellValue(row, column) as number
+        const prior = previous.current.get(key)
+        if (prior !== undefined && Number.isFinite(value) && Number.isFinite(prior) && value !== prior) {
+          next.set(key, value > prior ? 'up' : 'down')
+        }
+        previous.current.set(key, value)
+      }
+    }
+    if (next.size > 0) {
+      setFlashes(next)
+      const timer = setTimeout(() => setFlashes(new Map()), FLASH_MS)
+      return () => clearTimeout(timer)
+    }
+    return undefined
+  }, [rows])
+
+  return flashes
+}
+
+function RowMenu({ position, onRemoved }: { position: PositionRisk; onRemoved: () => void }): ReactElement {
+  const [open, setOpen] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const remove = async (): Promise<void> => {
+    setPending(true)
+    setError(null)
+    try {
+      await api.removePosition(position.id)
+      onRemoved()
+      setOpen(false)
+      setConfirming(false)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'failed to remove position')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <div className="relative inline-block text-left">
+      <button
+        type="button"
+        aria-label={`Row menu for ${position.description}`}
+        className="rounded px-1.5 py-0.5 text-neutral hover:bg-surface"
+        onClick={() => {
+          setOpen((v) => !v)
+          setConfirming(false)
+          setError(null)
+        }}
+      >
+        ⋮
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-10 mt-1 w-56 rounded border border-border bg-surface-raised p-2 text-left text-xs shadow-lg"
+        >
+          {!confirming ? (
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full rounded px-2 py-1 text-left text-down hover:bg-surface"
+              onClick={() => setConfirming(true)}
+            >
+              Remove position
+            </button>
+          ) : (
+            <div className="flex flex-col gap-2 px-2 py-1">
+              <p>Remove {position.description}?</p>
+              {error && <p className="text-down">{error}</p>}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={pending}
+                  className="rounded bg-down px-2 py-1 text-surface disabled:opacity-50"
+                  onClick={() => void remove()}
+                >
+                  {pending ? 'Removing…' : 'Confirm'}
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-border px-2 py-1"
+                  onClick={() => setConfirming(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The positions table: grouped by underlying with a dollar-measure subtotal per
+ * group, sortable within each group, sticky header, right-aligned tabular
+ * numbers, per-cell flash on change, and a row menu to remove a position. Reads
+ * only its props, never the store directly, so Part 21's backtest replay can
+ * feed it too (see the file's own comment in `App.tsx`/`Dashboard.tsx`). */
+export function PositionsTable({
+  positions,
+  onPositionsChanged,
+  className = '',
+}: {
+  positions: PositionRisk[]
+  onPositionsChanged?: () => void
+  className?: string
+}): ReactElement {
+  const [sort, setSort] = useState<SortState>(() => loadSortState() ?? DEFAULT_SORT)
+  const flashes = useCellFlashes(positions)
+
+  const setColumn = (column: SortColumn): void => {
+    setSort((current) => {
+      const next: SortState =
+        current.column === column
+          ? { column, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+          : { column, direction: 'asc' }
+      saveSortState(next)
+      return next
+    })
+  }
+
+  const groups = groupPositions(positions)
+
+  return (
+    <section
+      className={`flex flex-col gap-2 rounded-lg border border-border bg-surface-raised p-4 ${className}`}
+      aria-label="Positions"
+    >
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral">Positions</h2>
+      <div className="max-h-[32rem] overflow-auto">
+        <table className="w-full border-collapse text-sm tabular-nums">
+          <thead className="sticky top-0 bg-surface-raised">
+            <tr>
+              {COLUMNS.map((column) => (
+                <th
+                  key={column.key}
+                  scope="col"
+                  className={`cursor-pointer select-none border-b border-border px-2 py-1 font-medium text-neutral ${
+                    column.align === 'left' ? 'text-left' : 'text-right'
+                  }`}
+                  onClick={() => setColumn(column.key)}
+                  aria-sort={
+                    sort.column === column.key
+                      ? sort.direction === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                  }
+                >
+                  {column.label}
+                  {sort.column === column.key && (sort.direction === 'asc' ? ' ▲' : ' ▼')}
+                </th>
+              ))}
+              <th scope="col" className="border-b border-border px-2 py-1" />
+            </tr>
+          </thead>
+          <tbody>
+            {groups.length === 0 && (
+              <tr>
+                <td colSpan={COLUMNS.length + 1} className="px-2 py-4 text-center text-neutral">
+                  No positions.
+                </td>
+              </tr>
+            )}
+            {groups.map((group) => (
+              <GroupRows
+                key={group.underlying}
+                group={group}
+                sort={sort}
+                flashes={flashes}
+                onRemoved={() => onPositionsChanged?.()}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function GroupRows({
+  group,
+  sort,
+  flashes,
+  onRemoved,
+}: {
+  group: ReturnType<typeof groupPositions>[number]
+  sort: SortState
+  flashes: Map<string, 'up' | 'down'>
+  onRemoved: () => void
+}): ReactElement {
+  const rows = sortRows(group.rows, sort)
+  return (
+    <>
+      <tr>
+        <td colSpan={COLUMNS.length + 1} className="bg-surface px-2 py-1 text-xs font-semibold text-neutral">
+          {group.underlying}
+        </td>
+      </tr>
+      {rows.map((row) => (
+        <PositionRow key={row.id} row={row} flashes={flashes} onRemoved={onRemoved} />
+      ))}
+      <tr className="border-t border-border font-medium">
+        <td className="px-2 py-1">Subtotal</td>
+        <td className="px-2 py-1 text-right text-neutral" />
+        <td className="px-2 py-1 text-right text-neutral" />
+        <td className="px-2 py-1 text-right text-neutral" />
+        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.market_value)}`}>
+          {numberCell(group.subtotal.market_value)}
+        </td>
+        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.unrealised_pnl)}`}>
+          {numberCell(group.subtotal.unrealised_pnl)}
+        </td>
+        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.share_delta)}`}>
+          {numberCell(group.subtotal.share_delta, formatCompactNumber)}
+        </td>
+        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.dollar_delta)}`}>
+          {numberCell(group.subtotal.dollar_delta)}
+        </td>
+        <td className="px-2 py-1 text-right text-neutral" title="Share gamma is not shown on a subtotal; it is meaningful per underlying, and the per-position figures above already give it.">
+          —
+        </td>
+        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.vega)}`}>
+          {numberCell(group.subtotal.vega)}
+        </td>
+        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.theta)}`}>
+          {numberCell(group.subtotal.theta)}
+        </td>
+        <td className="px-2 py-1" />
+        <td className="px-2 py-1" />
+      </tr>
+    </>
+  )
+}
+
+function PositionRow({
+  row,
+  flashes,
+  onRemoved,
+}: {
+  row: PositionRisk
+  flashes: Map<string, 'up' | 'down'>
+  onRemoved: () => void
+}): ReactElement {
+  const expired = row.status.state === 'expired'
+  const errorReason = row.status.state === 'error' ? row.status.reason : undefined
+  const flashClass = (column: SortColumn): string => {
+    const flash = flashes.get(cellKey(row.id, column))
+    return flash ? `flash-${flash}` : ''
+  }
+
+  return (
+    <tr
+      className={expired ? 'text-neutral/60' : ''}
+      title={errorReason}
+      data-testid="position-row"
+    >
+      <td className="px-2 py-1 text-left">{row.description}</td>
+      <td className={`px-2 py-1 text-right ${flashClass('quantity')}`}>
+        {formatCompactNumber(row.quantity)}
+      </td>
+      <td className={`px-2 py-1 text-right ${flashClass('spot')}`}>{formatCompactCurrency(row.spot)}</td>
+      <td className={`px-2 py-1 text-right ${flashClass('mark')}`}>{formatCompactCurrency(row.mark)}</td>
+      <td className={`px-2 py-1 text-right ${signColor(row.market_value)} ${flashClass('market_value')}`}>
+        {formatCompactCurrency(row.market_value)}
+      </td>
+      <td
+        className={`px-2 py-1 text-right ${signColor(row.unrealised_pnl)} ${flashClass('unrealised_pnl')}`}
+      >
+        {formatCompactCurrency(row.unrealised_pnl)}
+      </td>
+      <td className={`px-2 py-1 text-right ${flashClass('share_delta')}`}>
+        {formatCompactNumber(row.reporting.share_delta)}
+      </td>
+      <td
+        className={`px-2 py-1 text-right ${signColor(row.reporting.dollar_delta)} ${flashClass('dollar_delta')}`}
+      >
+        {formatCompactCurrency(row.reporting.dollar_delta)}
+      </td>
+      <td className={`px-2 py-1 text-right ${flashClass('share_gamma')}`}>
+        {formatCompactNumber(row.reporting.share_gamma)}
+      </td>
+      <td className={`px-2 py-1 text-right ${signColor(row.reporting.vega)} ${flashClass('vega')}`}>
+        {formatCompactCurrency(row.reporting.vega)}
+      </td>
+      <td className={`px-2 py-1 text-right ${signColor(row.reporting.theta)} ${flashClass('theta')}`}>
+        {formatCompactCurrency(row.reporting.theta)}
+      </td>
+      <td className="px-2 py-1 text-right capitalize">{row.status.state}</td>
+      <td className="px-2 py-1 text-right">
+        <RowMenu position={row} onRemoved={onRemoved} />
+      </td>
+    </tr>
+  )
+}

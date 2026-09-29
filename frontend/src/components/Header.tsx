@@ -1,6 +1,7 @@
 import { useCallback, useState, type ReactElement } from 'react'
 
 import { api } from '../api/rest'
+import { formatMicros } from '../lib/format'
 import { useConnectionStatus, useSnapshot } from '../store/riskStore'
 import { ConnectionDot } from './ConnectionDot'
 
@@ -20,18 +21,18 @@ function formatSpeed(speed: number): string {
   return `${speed % 1 === 0 ? speed.toFixed(0) : speed.toFixed(1)}×`
 }
 
-function formatComputeMicros(micros: number): string {
-  return micros >= 1_000 ? `${(micros / 1_000).toFixed(2)} ms` : `${micros.toFixed(0)} µs`
-}
-
 /** The app's header: name, connection dot, sim time and session state, clock speed,
  * a pause/resume control and `compute_micros`. Live figures come from the latest
  * `RiskSnapshot`; while the socket is down these simply hold their last known values,
- * since the polling fallback does not carry a full snapshot (see `src/api/stream.ts`). */
+ * since the polling fallback does not carry a full snapshot (see `src/api/stream.ts`).
+ * That is the correct value to show, but not to show unlabelled: while disconnected
+ * (`polling` or `closed`), these frozen fields are greyed out with a "stale" marker,
+ * comparing `status` itself since a snapshot carries no staleness flag of its own. */
 export function Header(): ReactElement {
   const status = useConnectionStatus()
   const snapshot = useSnapshot()
   const [pending, setPending] = useState(false)
+  const stale = (status === 'polling' || status === 'closed') && snapshot !== null
 
   const togglePause = useCallback(() => {
     if (!snapshot || pending) return
@@ -52,7 +53,9 @@ export function Header(): ReactElement {
         <h1 className="text-lg font-semibold">Real-Time Risk Monitor</h1>
         <ConnectionDot status={status} />
       </div>
-      <div className="flex flex-wrap items-center gap-4 text-sm tabular-nums">
+      <div
+        className={`flex flex-wrap items-center gap-4 text-sm tabular-nums ${stale ? 'text-neutral/70' : ''}`}
+      >
         <span data-testid="sim-time">
           <span className="text-neutral">Sim time </span>
           {snapshot ? formatSimTime(snapshot.sim_time) : '—'}
@@ -70,8 +73,17 @@ export function Header(): ReactElement {
         </span>
         <span data-testid="compute-micros">
           <span className="text-neutral">Compute </span>
-          {snapshot ? formatComputeMicros(snapshot.compute_micros) : '—'}
+          {snapshot ? formatMicros(snapshot.compute_micros) : '—'}
         </span>
+        {stale && (
+          <span
+            data-testid="stale-marker"
+            className="rounded bg-warning/20 px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-warning"
+            title="Disconnected: these figures are the last ones received, not live."
+          >
+            Stale
+          </span>
+        )}
         <button
           type="button"
           onClick={togglePause}

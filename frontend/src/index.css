@@ -28,3 +28,60 @@ body {
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+/* A 400ms flash on a table cell whose value just changed: green for an
+   increase, red for a decrease. Disabled under prefers-reduced-motion, per
+   Part 15's prompt, by skipping straight to the transparent end state. */
+@keyframes flash-up {
+  from {
+    background-color: rgb(52 211 153 / 35%);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@keyframes flash-down {
+  from {
+    background-color: rgb(248 113 113 / 35%);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+.flash-up {
+  animation: flash-up 400ms ease-out;
+}
+
+.flash-down {
+  animation: flash-down 400ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flash-up,
+  .flash-down {
+    animation: none;
+  }
+}
+
+/* A short pulse on the alerts pane border when a new breach arrives. */
+@keyframes pane-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(239 68 68 / 0%);
+  }
+  25% {
+    box-shadow: 0 0 0 3px rgb(239 68 68 / 60%);
+  }
+}
+
+.pane-pulse {
+  animation: pane-pulse 900ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-pulse {
+    animation: none;
+  }
+}

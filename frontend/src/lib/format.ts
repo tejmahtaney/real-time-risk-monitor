@@ -65,3 +65,9 @@ export function formatCompactNumber(value: number): string {
   const magnitude = formatCompactMagnitude(Math.abs(value))
   return negative ? `−${magnitude}` : magnitude
 }
+
+/** `compute_micros` as `123 µs` or, once it crosses a millisecond, `1.23 ms`. */
+export function formatMicros(micros: number): string {
+  if (!Number.isFinite(micros)) return '—'
+  return micros >= 1_000 ? `${(micros / 1_000).toFixed(2)} ms` : `${micros.toFixed(0)} µs`
+}
