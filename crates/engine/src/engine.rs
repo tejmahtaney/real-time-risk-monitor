@@ -664,3 +664,44 @@ fn push_history(history: &mut VecDeque<HistoryPoint>, capacity: usize, point: Hi
     }
     history.push_back(point);
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::Ordering;
+
+    use chrono::TimeZone;
+
+    use super::*;
+
+    fn control_record(speed: f64) -> RecorderRecord {
+        let now = Utc.with_ymd_and_hms(2026, 9, 26, 4, 15, 0).unwrap();
+        RecorderRecord::Event(SessionEvent::Control {
+            wall_time: now,
+            sim_time: now,
+            action: ControlAction::SetSpeed { speed },
+        })
+    }
+
+    #[test]
+    fn a_full_channel_drops_the_records_the_receiver_has_no_room_for() {
+        let (tx, mut rx) = mpsc::channel(2);
+        let dropped = Arc::new(AtomicU64::new(0));
+        let mut pending: Vec<RecorderRecord> =
+            (0..5).map(|i| control_record(f64::from(i))).collect();
+
+        send_pending_records(&mut pending, &tx, &dropped);
+
+        assert!(pending.is_empty(), "every record must be drained");
+        assert_eq!(
+            dropped.load(Ordering::Relaxed),
+            3,
+            "5 records into a channel with room for 2 leaves 3 dropped"
+        );
+        assert!(rx.try_recv().is_ok());
+        assert!(rx.try_recv().is_ok());
+        assert!(
+            rx.try_recv().is_err(),
+            "only the first 2 records should have made it onto the channel"
+        );
+    }
+}
