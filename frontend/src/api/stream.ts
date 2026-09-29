@@ -25,6 +25,13 @@
  * during an outage; polling stops the moment the socket reopens. On reopening after a
  * previous connection, `GET /api/history?since=<last seq>` backfills whatever ticks
  * were missed, using the store's own optimistic history when the gap is small.
+ *
+ * On the very first call, {@link startStream} also does one unconditional
+ * `GET /api/history` (the full buffered history, no `since`) before ever opening the
+ * socket, so the Part 16 charts have something to draw as soon as the page loads,
+ * rather than waiting for a whole window's worth of live ticks. `mergeHistory`
+ * dedupes by `seq`, so this races harmlessly against the socket's own first snapshot,
+ * whichever arrives first.
  */
 import type { AlertEvent } from './generated/AlertEvent'
 import type { RiskSnapshot } from './generated/RiskSnapshot'
@@ -75,7 +82,20 @@ let state = freshState()
 export function startStream(wsUrl: () => string = defaultWsUrl): void {
   if (state.started) return
   state.started = true
+  void bootstrapHistory()
   connect(wsUrl)
+}
+
+/** The one-time "on load" backfill described in this module's doc comment: whatever
+ * the engine's history ring buffer already holds, fetched once up front regardless
+ * of whether the socket is even open yet. */
+async function bootstrapHistory(): Promise<void> {
+  try {
+    const points = await api.history()
+    useRiskStore.getState().mergeHistory(points)
+  } catch (err) {
+    useRiskStore.getState().setError(err instanceof Error ? err.message : String(err))
+  }
 }
 
 /** Tears down the singleton and resets all module state. Production code never calls

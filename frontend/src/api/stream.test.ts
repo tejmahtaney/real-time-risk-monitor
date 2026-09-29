@@ -157,6 +157,15 @@ describe('stream', () => {
     expect(MockWebSocket.instances).toHaveLength(3)
   })
 
+  it('backfills the full buffered history once on load, before the socket even opens', async () => {
+    mockFetchJson([{ seq: 1 }, { seq: 2 }])
+    startStream(testWsUrl)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(fetchedPaths()).toContain('/api/history')
+    expect(useRiskStore.getState().history.map((p) => p.seq)).toEqual([1, 2])
+  })
+
   it('backfills history since the last known seq on reconnect', async () => {
     startStream(testWsUrl)
     latestSocket().triggerOpen()

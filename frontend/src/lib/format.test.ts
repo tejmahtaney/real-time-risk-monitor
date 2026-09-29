@@ -1,13 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import {
-  formatCompactCurrency,
-  formatCompactNumber,
-  formatPercent,
-  formatPerDay,
-  formatPerVolPoint,
-  signColor,
-} from './format'
+import { formatCompactCurrency, formatCompactNumber, formatPercent, formatSimTime, signColor } from './format'
 
 describe('formatCompactCurrency', () => {
   it('formats thousands with a k suffix', () => {
@@ -80,12 +73,33 @@ describe('formatPercent', () => {
   })
 })
 
-describe('unit labels', () => {
-  it('labels a vega figure per vol point', () => {
-    expect(formatPerVolPoint(1_200)).toBe('$1.2k / vol pt')
+describe('formatSimTime', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
   })
 
-  it('labels a theta figure per day', () => {
-    expect(formatPerDay(-450)).toBe('−$450 / day')
+  it('formats an ISO timestamp as an ET clock with seconds by default', () => {
+    // 14:16:03 UTC = 10:16:03 EDT (America/New_York is UTC-4 in September, under DST).
+    expect(formatSimTime('2026-09-29T14:16:03Z')).toBe('10:16:03 ET')
+  })
+
+  it("renders in America/New_York regardless of the browser's own local timezone", () => {
+    // Asia/Singapore (UTC+8) is a fixed offset with no DST, chosen specifically to
+    // contrast with US Eastern: the same instant must print the same ET wall clock
+    // no matter what this line sets TZ to.
+    vi.stubEnv('TZ', 'Asia/Singapore')
+    expect(formatSimTime('2026-09-29T14:16:03Z')).toBe('10:16:03 ET')
+  })
+
+  it('drops seconds when asked, for a compact axis tick', () => {
+    expect(formatSimTime('2026-09-29T14:16:03Z', { seconds: false })).toBe('10:16 ET')
+  })
+
+  it('adds the month and day when asked', () => {
+    expect(formatSimTime('2026-09-29T14:16:03Z', { withDate: true })).toBe('Sep 29, 10:16:03 ET')
+  })
+
+  it('returns an unparseable value unchanged rather than throwing', () => {
+    expect(formatSimTime('not-a-date')).toBe('not-a-date')
   })
 })

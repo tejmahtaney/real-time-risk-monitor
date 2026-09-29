@@ -1,21 +1,9 @@
 import { useCallback, useState, type ReactElement } from 'react'
 
 import { api } from '../api/rest'
-import { formatMicros } from '../lib/format'
+import { formatMicros, formatSimTime } from '../lib/format'
 import { useConnectionStatus, useSnapshot } from '../store/riskStore'
 import { ConnectionDot } from './ConnectionDot'
-
-function formatSimTime(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return iso
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-}
 
 function formatSpeed(speed: number): string {
   return `${speed % 1 === 0 ? speed.toFixed(0) : speed.toFixed(1)}×`
@@ -58,7 +46,7 @@ export function Header(): ReactElement {
       >
         <span data-testid="sim-time">
           <span className="text-neutral">Sim time </span>
-          {snapshot ? formatSimTime(snapshot.sim_time) : '—'}
+          {snapshot ? formatSimTime(snapshot.sim_time, { withDate: true }) : '—'}
         </span>
         <span data-testid="session-state">
           <span className="text-neutral">Session </span>

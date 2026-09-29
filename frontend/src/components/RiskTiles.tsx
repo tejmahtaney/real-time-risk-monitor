@@ -3,14 +3,7 @@ import type { ReactElement } from 'react'
 import type { LimitKind } from '../api/generated/LimitKind'
 import type { LimitStatus } from '../api/generated/LimitStatus'
 import type { PortfolioTotals } from '../api/generated/PortfolioTotals'
-import {
-  formatCompactCurrency,
-  formatMicros,
-  formatPercent,
-  formatPerDay,
-  formatPerVolPoint,
-  signColor,
-} from '../lib/format'
+import { formatCompactCurrency, formatMicros, formatPercent, signColor } from '../lib/format'
 import { limitBarClass, portfolioLimit } from '../lib/limits'
 
 interface LimitedTileDef {
@@ -41,19 +34,19 @@ const LIMITED_TILES: LimitedTileDef[] = [
   },
   {
     key: 'vega',
-    label: 'Vega',
+    label: 'Vega ($/vol pt)',
     limitKind: 'portfolio_vega',
     tooltip: 'P&L from a 1 vol point rise in implied volatility.',
     value: (t) => t.vega,
-    format: formatPerVolPoint,
+    format: formatCompactCurrency,
   },
   {
     key: 'theta',
-    label: 'Theta',
+    label: 'Theta ($/day)',
     limitKind: 'portfolio_theta_floor',
     tooltip: 'P&L from one calendar day passing, all else equal.',
     value: (t) => t.theta,
-    format: formatPerDay,
+    format: formatCompactCurrency,
   },
   {
     key: 'gross_exposure',
@@ -75,8 +68,10 @@ function LimitedTile({ def, totals, limits }: { def: LimitedTileDef; totals: Por
       data-testid={`tile-${def.key}`}
       data-state={limit?.state ?? 'ok'}
     >
-      <span className="text-xs uppercase tracking-wide text-neutral">{def.label}</span>
-      <span className={`text-lg font-semibold tabular-nums ${signColor(value)}`}>{def.format(value)}</span>
+      <span className="whitespace-nowrap text-xs uppercase tracking-wide text-neutral">{def.label}</span>
+      <span className={`whitespace-nowrap text-lg font-semibold tabular-nums ${signColor(value)}`}>
+        {def.format(value)}
+      </span>
       {limit && (
         <>
           <div className="h-1.5 w-full overflow-hidden rounded bg-surface">
@@ -85,7 +80,7 @@ function LimitedTile({ def, totals, limits }: { def: LimitedTileDef; totals: Por
               style={{ width: `${Math.min(limit.utilisation, 1) * 100}%` }}
             />
           </div>
-          <span className="text-xs text-neutral">
+          <span className="whitespace-nowrap text-xs text-neutral">
             {formatPercent(limit.utilisation)} of {def.format(limit.limit)}
           </span>
         </>
@@ -132,7 +127,7 @@ export function RiskTiles({
               data-testid="tile-pnl-today"
             >
               <span className="text-xs uppercase tracking-wide text-neutral">Today&apos;s P&amp;L</span>
-              <span className={`text-lg font-semibold tabular-nums ${signColor(pnlToday ?? 0)}`}>
+              <span className={`whitespace-nowrap text-lg font-semibold tabular-nums ${signColor(pnlToday ?? 0)}`}>
                 {pnlToday === null ? '—' : formatCompactCurrency(pnlToday)}
               </span>
             </div>
@@ -141,8 +136,8 @@ export function RiskTiles({
               title="Microseconds spent computing the last tick."
               data-testid="tile-compute-micros"
             >
-              <span className="text-xs uppercase tracking-wide text-neutral">compute_micros</span>
-              <span className="text-lg font-semibold tabular-nums">
+              <span className="text-xs uppercase tracking-wide text-neutral">Compute time</span>
+              <span className="whitespace-nowrap text-lg font-semibold tabular-nums">
                 {computeMicros === null ? '—' : formatMicros(computeMicros)}
               </span>
             </div>

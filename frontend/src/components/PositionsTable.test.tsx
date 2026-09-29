@@ -101,6 +101,30 @@ describe('PositionsTable sorting', () => {
   })
 })
 
+describe('PositionsTable value-change pulse', () => {
+  it('does not pulse a cell whose displayed text is unchanged, even if the raw value moved slightly', () => {
+    const { rerender } = render(<PositionsTable positions={[position({ id: 'a', spot: 230 })]} />)
+    rerender(<PositionsTable positions={[position({ id: 'a', spot: 230.4 })]} />)
+    const cells = screen.getByTestId('position-row').querySelectorAll('td')
+    expect(cells[2]?.className).not.toMatch(/text-pulse/)
+  })
+
+  it('pulses a cell green with a text-colour class, never a background class, when its displayed value rises', () => {
+    const { rerender } = render(<PositionsTable positions={[position({ id: 'a', spot: 230 })]} />)
+    rerender(<PositionsTable positions={[position({ id: 'a', spot: 235 })]} />)
+    const cells = screen.getByTestId('position-row').querySelectorAll('td')
+    expect(cells[2]?.className).toContain('text-pulse-up')
+    expect(cells[2]?.className).not.toMatch(/bg-(up|down|breach|warning)/)
+  })
+
+  it('pulses red when its displayed value falls', () => {
+    const { rerender } = render(<PositionsTable positions={[position({ id: 'a', spot: 235 })]} />)
+    rerender(<PositionsTable positions={[position({ id: 'a', spot: 230 })]} />)
+    const cells = screen.getByTestId('position-row').querySelectorAll('td')
+    expect(cells[2]?.className).toContain('text-pulse-down')
+  })
+})
+
 describe('PositionsTable status display', () => {
   it('greys an expired row', () => {
     render(<PositionsTable positions={[position({ status: { state: 'expired' } })]} />)

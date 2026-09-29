@@ -48,16 +48,6 @@ export function formatPercent(fraction: number, digits = 1): string {
   return `${(fraction * 100).toFixed(digits)}%`
 }
 
-/** `$ per vol pt`: a vega figure, already in reporting units (dollars per vol point). */
-export function formatPerVolPoint(value: number): string {
-  return `${formatCompactCurrency(value)} / vol pt`
-}
-
-/** `$ per day`: a theta figure, already in reporting units (dollars per calendar day). */
-export function formatPerDay(value: number): string {
-  return `${formatCompactCurrency(value)} / day`
-}
-
 /** A plain compact number (no currency sign), such as `2.1k`, for share counts. */
 export function formatCompactNumber(value: number): string {
   if (!Number.isFinite(value)) return '—'
@@ -70,4 +60,35 @@ export function formatCompactNumber(value: number): string {
 export function formatMicros(micros: number): string {
   if (!Number.isFinite(micros)) return '—'
   return micros >= 1_000 ? `${(micros / 1_000).toFixed(2)} ms` : `${micros.toFixed(0)} µs`
+}
+
+/** The market's own timezone (CLAUDE.md: "The market time zone is
+ * America/New_York"). Every `sim_time` on the wire is a UTC instant with no
+ * timezone of its own to display in — {@link formatSimTime} always renders it here,
+ * explicitly, rather than in whatever timezone the viewer's browser happens to be
+ * set to. */
+const MARKET_TIME_ZONE = 'America/New_York'
+
+/**
+ * A `sim_time` ISO timestamp rendered in {@link MARKET_TIME_ZONE} with an explicit
+ * "ET" suffix, so `10:16:00 ET` reads the same on a browser in New York and one in
+ * Singapore — an unlabelled, unzoned `toLocaleTimeString` would show the Singapore
+ * browser its own local wall clock (`10:16:00 PM`) for a 10:16 AM New York tick.
+ * `seconds: false` drops the seconds field, for a compact axis tick; `withDate:
+ * true` adds the month and day, for a context with no date otherwise visible. An
+ * unparseable value (should not happen; every `sim_time` on the wire is a real
+ * `DateTime<Utc>`) is returned as-is rather than throwing. */
+export function formatSimTime(iso: string, opts: { seconds?: boolean; withDate?: boolean } = {}): string {
+  const { seconds = true, withDate = false } = opts
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  const formatted = date.toLocaleString('en-US', {
+    timeZone: MARKET_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    ...(seconds ? { second: '2-digit' } : {}),
+    ...(withDate ? { month: 'short', day: 'numeric' } : {}),
+  })
+  return `${formatted} ET`
 }

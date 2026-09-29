@@ -2,14 +2,8 @@ import { useEffect, useRef, useState, type ReactElement } from 'react'
 
 import type { AlertEvent } from '../api/generated/AlertEvent'
 import type { LimitStatus } from '../api/generated/LimitStatus'
-import { formatCompactCurrency } from '../lib/format'
+import { formatCompactCurrency, formatSimTime } from '../lib/format'
 import { limitLabel, scopeLabel, stateRank } from '../lib/limits'
-
-function formatSimTime(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return iso
-  return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
 
 function sortActive(active: LimitStatus[]): LimitStatus[] {
   return [...active].sort((a, b) => {

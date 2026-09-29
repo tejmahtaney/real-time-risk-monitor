@@ -11,6 +11,7 @@ import {
   type SortColumn,
   type SortState,
 } from '../lib/positionGroups'
+import { symbolColor } from '../lib/symbolColors'
 
 interface Column {
   key: SortColumn
@@ -40,7 +41,7 @@ function numberCell(value: number, formatter: (v: number) => string = formatComp
 }
 
 /** A flat key for one cell, used to remember its previous value across renders
- * so a genuine change can be flashed green or red. */
+ * so a genuine change can pulse green or red. */
 function cellKey(rowId: string, column: SortColumn): string {
   return `${rowId}:${column}`
 }
@@ -87,13 +88,32 @@ function cellValue(row: PositionRisk, column: SortColumn): number | string {
   }
 }
 
-/** Tracks the previous numeric value of every visible cell and returns a
- * lookup of which cells should flash, and which colour, on this render.
- * Cleared out again after {@link FLASH_MS}. */
-const FLASH_MS = 400
+/** The exact text a numeric cell renders, using the same formatter its `<td>` does
+ * below — {@link useCellFlashes} diffs this, not the raw number, so a change too
+ * small to show up on screen (spot moving a fraction of a cent, say) does not
+ * flash a cell whose displayed text hasn't actually changed. */
+function cellText(row: PositionRisk, column: SortColumn): string {
+  switch (column) {
+    case 'quantity':
+    case 'share_delta':
+    case 'share_gamma':
+      return formatCompactNumber(cellValue(row, column) as number)
+    default:
+      return formatCompactCurrency(cellValue(row, column) as number)
+  }
+}
+
+/** Tracks every visible cell's previously displayed text and raw value, and
+ * returns a lookup of which cells should pulse, and which direction, on this
+ * render. A cell pulses only when its *displayed text* changes (see {@link
+ * cellText}); the direction shown still comes from the raw value, so a pulse
+ * always points the right way even when the rounded text alone wouldn't say.
+ * Cleared out again after {@link PULSE_MS}. */
+const PULSE_MS = 400
 
 function useCellFlashes(rows: PositionRisk[]): Map<string, 'up' | 'down'> {
-  const previous = useRef<Map<string, number>>(new Map())
+  const previousText = useRef<Map<string, string>>(new Map())
+  const previousValue = useRef<Map<string, number>>(new Map())
   const [flashes, setFlashes] = useState<Map<string, 'up' | 'down'>>(new Map())
 
   useEffect(() => {
@@ -101,17 +121,24 @@ function useCellFlashes(rows: PositionRisk[]): Map<string, 'up' | 'down'> {
     for (const row of rows) {
       for (const column of NUMERIC_COLUMNS) {
         const key = cellKey(row.id, column)
+        const text = cellText(row, column)
         const value = cellValue(row, column) as number
-        const prior = previous.current.get(key)
-        if (prior !== undefined && Number.isFinite(value) && Number.isFinite(prior) && value !== prior) {
-          next.set(key, value > prior ? 'up' : 'down')
+        const priorText = previousText.current.get(key)
+        const priorValue = previousValue.current.get(key)
+        if (priorText !== undefined && text !== priorText) {
+          const direction: 'up' | 'down' =
+            Number.isFinite(value) && Number.isFinite(priorValue) && value < (priorValue as number)
+              ? 'down'
+              : 'up'
+          next.set(key, direction)
         }
-        previous.current.set(key, value)
+        previousText.current.set(key, text)
+        previousValue.current.set(key, value)
       }
     }
     if (next.size > 0) {
       setFlashes(next)
-      const timer = setTimeout(() => setFlashes(new Map()), FLASH_MS)
+      const timer = setTimeout(() => setFlashes(new Map()), PULSE_MS)
       return () => clearTimeout(timer)
     }
     return undefined
@@ -234,15 +261,15 @@ export function PositionsTable({
       aria-label="Positions"
     >
       <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral">Positions</h2>
-      <div className="max-h-[32rem] overflow-auto">
-        <table className="w-full border-collapse text-sm tabular-nums">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-max border-collapse text-sm tabular-nums">
           <thead className="sticky top-0 bg-surface-raised">
             <tr>
               {COLUMNS.map((column) => (
                 <th
                   key={column.key}
                   scope="col"
-                  className={`cursor-pointer select-none border-b border-border px-2 py-1 font-medium text-neutral ${
+                  className={`cursor-pointer select-none whitespace-nowrap border-b border-border px-2 py-1 font-medium text-neutral ${
                     column.align === 'left' ? 'text-left' : 'text-right'
                   }`}
                   onClick={() => setColumn(column.key)}
@@ -301,36 +328,46 @@ function GroupRows({
     <>
       <tr>
         <td colSpan={COLUMNS.length + 1} className="bg-surface px-2 py-1 text-xs font-semibold text-neutral">
-          {group.underlying}
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ backgroundColor: symbolColor(group.underlying) }}
+              aria-hidden
+            />
+            {group.underlying}
+          </span>
         </td>
       </tr>
       {rows.map((row) => (
         <PositionRow key={row.id} row={row} flashes={flashes} onRemoved={onRemoved} />
       ))}
       <tr className="border-t border-border font-medium">
-        <td className="px-2 py-1">Subtotal</td>
-        <td className="px-2 py-1 text-right text-neutral" />
-        <td className="px-2 py-1 text-right text-neutral" />
-        <td className="px-2 py-1 text-right text-neutral" />
-        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.market_value)}`}>
+        <td className="whitespace-nowrap px-2 py-1">Subtotal</td>
+        <td className="whitespace-nowrap px-2 py-1 text-right text-neutral" />
+        <td className="whitespace-nowrap px-2 py-1 text-right text-neutral" />
+        <td className="whitespace-nowrap px-2 py-1 text-right text-neutral" />
+        <td className={`whitespace-nowrap px-2 py-1 text-right ${signColor(group.subtotal.market_value)}`}>
           {numberCell(group.subtotal.market_value)}
         </td>
-        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.unrealised_pnl)}`}>
+        <td className={`whitespace-nowrap px-2 py-1 text-right ${signColor(group.subtotal.unrealised_pnl)}`}>
           {numberCell(group.subtotal.unrealised_pnl)}
         </td>
-        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.share_delta)}`}>
+        <td className={`whitespace-nowrap px-2 py-1 text-right ${signColor(group.subtotal.share_delta)}`}>
           {numberCell(group.subtotal.share_delta, formatCompactNumber)}
         </td>
-        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.dollar_delta)}`}>
+        <td className={`whitespace-nowrap px-2 py-1 text-right ${signColor(group.subtotal.dollar_delta)}`}>
           {numberCell(group.subtotal.dollar_delta)}
         </td>
-        <td className="px-2 py-1 text-right text-neutral" title="Share gamma is not shown on a subtotal; it is meaningful per underlying, and the per-position figures above already give it.">
+        <td
+          className="whitespace-nowrap px-2 py-1 text-right text-neutral"
+          title="Share gamma is not shown on a subtotal; it is meaningful per underlying, and the per-position figures above already give it."
+        >
           —
         </td>
-        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.vega)}`}>
+        <td className={`whitespace-nowrap px-2 py-1 text-right ${signColor(group.subtotal.vega)}`}>
           {numberCell(group.subtotal.vega)}
         </td>
-        <td className={`px-2 py-1 text-right ${signColor(group.subtotal.theta)}`}>
+        <td className={`whitespace-nowrap px-2 py-1 text-right ${signColor(group.subtotal.theta)}`}>
           {numberCell(group.subtotal.theta)}
         </td>
         <td className="px-2 py-1" />
@@ -351,9 +388,9 @@ function PositionRow({
 }): ReactElement {
   const expired = row.status.state === 'expired'
   const errorReason = row.status.state === 'error' ? row.status.reason : undefined
-  const flashClass = (column: SortColumn): string => {
-    const flash = flashes.get(cellKey(row.id, column))
-    return flash ? `flash-${flash}` : ''
+  const pulseClass = (column: SortColumn): string => {
+    const pulse = flashes.get(cellKey(row.id, column))
+    return pulse ? `text-pulse-${pulse}` : ''
   }
 
   return (
@@ -362,39 +399,43 @@ function PositionRow({
       title={errorReason}
       data-testid="position-row"
     >
-      <td className="px-2 py-1 text-left">{row.description}</td>
-      <td className={`px-2 py-1 text-right ${flashClass('quantity')}`}>
+      <td className="whitespace-nowrap px-2 py-1 text-left">{row.description}</td>
+      <td className={`whitespace-nowrap px-2 py-1 text-right ${pulseClass('quantity')}`}>
         {formatCompactNumber(row.quantity)}
       </td>
-      <td className={`px-2 py-1 text-right ${flashClass('spot')}`}>{formatCompactCurrency(row.spot)}</td>
-      <td className={`px-2 py-1 text-right ${flashClass('mark')}`}>{formatCompactCurrency(row.mark)}</td>
-      <td className={`px-2 py-1 text-right ${signColor(row.market_value)} ${flashClass('market_value')}`}>
+      <td className={`whitespace-nowrap px-2 py-1 text-right ${pulseClass('spot')}`}>
+        {formatCompactCurrency(row.spot)}
+      </td>
+      <td className={`whitespace-nowrap px-2 py-1 text-right ${pulseClass('mark')}`}>
+        {formatCompactCurrency(row.mark)}
+      </td>
+      <td className={`whitespace-nowrap px-2 py-1 text-right ${signColor(row.market_value)} ${pulseClass('market_value')}`}>
         {formatCompactCurrency(row.market_value)}
       </td>
       <td
-        className={`px-2 py-1 text-right ${signColor(row.unrealised_pnl)} ${flashClass('unrealised_pnl')}`}
+        className={`whitespace-nowrap px-2 py-1 text-right ${signColor(row.unrealised_pnl)} ${pulseClass('unrealised_pnl')}`}
       >
         {formatCompactCurrency(row.unrealised_pnl)}
       </td>
-      <td className={`px-2 py-1 text-right ${flashClass('share_delta')}`}>
+      <td className={`whitespace-nowrap px-2 py-1 text-right ${pulseClass('share_delta')}`}>
         {formatCompactNumber(row.reporting.share_delta)}
       </td>
       <td
-        className={`px-2 py-1 text-right ${signColor(row.reporting.dollar_delta)} ${flashClass('dollar_delta')}`}
+        className={`whitespace-nowrap px-2 py-1 text-right ${signColor(row.reporting.dollar_delta)} ${pulseClass('dollar_delta')}`}
       >
         {formatCompactCurrency(row.reporting.dollar_delta)}
       </td>
-      <td className={`px-2 py-1 text-right ${flashClass('share_gamma')}`}>
+      <td className={`whitespace-nowrap px-2 py-1 text-right ${pulseClass('share_gamma')}`}>
         {formatCompactNumber(row.reporting.share_gamma)}
       </td>
-      <td className={`px-2 py-1 text-right ${signColor(row.reporting.vega)} ${flashClass('vega')}`}>
+      <td className={`whitespace-nowrap px-2 py-1 text-right ${signColor(row.reporting.vega)} ${pulseClass('vega')}`}>
         {formatCompactCurrency(row.reporting.vega)}
       </td>
-      <td className={`px-2 py-1 text-right ${signColor(row.reporting.theta)} ${flashClass('theta')}`}>
+      <td className={`whitespace-nowrap px-2 py-1 text-right ${signColor(row.reporting.theta)} ${pulseClass('theta')}`}>
         {formatCompactCurrency(row.reporting.theta)}
       </td>
-      <td className="px-2 py-1 text-right capitalize">{row.status.state}</td>
-      <td className="px-2 py-1 text-right">
+      <td className="whitespace-nowrap px-2 py-1 text-right capitalize">{row.status.state}</td>
+      <td className="whitespace-nowrap px-2 py-1 text-right">
         <RowMenu position={row} onRemoved={onRemoved} />
       </td>
     </tr>

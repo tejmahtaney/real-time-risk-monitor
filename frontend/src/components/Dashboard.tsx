@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 
+import { useThrottledHistory } from '../hooks/useThrottledHistory'
 import {
   useConnectionStatus,
   usePolledPositions,
@@ -7,8 +8,10 @@ import {
   useSnapshot,
 } from '../store/riskStore'
 import { AlertsPane } from './AlertsPane'
+import { AllocationDonut } from './AllocationDonut'
 import { Controls } from './Controls'
-import { PlaceholderPanel } from './PlaceholderPanel'
+import { GreeksCharts } from './GreeksCharts'
+import { PnlAttributionPanel } from './PnlAttributionPanel'
 import { PositionsTable } from './PositionsTable'
 import { RiskTiles } from './RiskTiles'
 
@@ -20,15 +23,18 @@ import { RiskTiles } from './RiskTiles'
  *
  * While the socket is open, live figures come from the latest `RiskSnapshot`.
  * While it is down, positions/totals/limits/compute_micros fall back to the
- * polling client's last response (see `src/api/stream.ts`); alerts and
- * today's P&L have no polling route, so they simply hold their last known
- * snapshot value, same as the header (see `Header.tsx`).
+ * polling client's last response (see `src/api/stream.ts`); alerts, today's P&L
+ * and the Part 16 charts below (allocation's `by_underlying`, the whole `PnlReport`,
+ * and `history`, none of which any polling route carries) have no polling
+ * fallback, so they simply hold their last known snapshot value, same as the
+ * header (see `Header.tsx`).
  */
 export function Dashboard(): ReactElement {
   const status = useConnectionStatus()
   const snapshot = useSnapshot()
   const polledSummary = usePolledSummary()
   const polledPositions = usePolledPositions()
+  const history = useThrottledHistory()
 
   const live = status === 'open'
   const positions = live ? (snapshot?.positions ?? []) : (polledPositions ?? snapshot?.positions ?? [])
@@ -39,6 +45,9 @@ export function Dashboard(): ReactElement {
   const computeMicros = live
     ? (snapshot?.compute_micros ?? null)
     : (polledSummary?.compute_micros ?? snapshot?.compute_micros ?? null)
+  const concentration = live
+    ? (snapshot?.summary.concentration ?? [])
+    : (polledSummary?.concentration ?? snapshot?.summary.concentration ?? [])
 
   return (
     <>
@@ -55,7 +64,9 @@ export function Dashboard(): ReactElement {
         className="lg:col-span-2"
       />
       <Controls paused={snapshot?.paused ?? null} clockSpeed={snapshot?.clock_speed ?? null} />
-      <PlaceholderPanel title="Charts" note="Greeks, allocation and P&L charts land in Part 16." />
+      <GreeksCharts history={history} limits={limits} className="lg:col-span-3" />
+      <AllocationDonut concentration={concentration} byUnderlying={snapshot?.summary.by_underlying ?? {}} />
+      <PnlAttributionPanel pnl={snapshot?.pnl ?? null} className="lg:col-span-2" />
     </>
   )
 }

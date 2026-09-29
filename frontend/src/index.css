@@ -29,38 +29,44 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* A 400ms flash on a table cell whose value just changed: green for an
-   increase, red for a decrease. Disabled under prefers-reduced-motion, per
-   Part 15's prompt, by skipping straight to the transparent end state. */
-@keyframes flash-up {
+/* A 400ms text-colour pulse on a table cell whose *displayed* value just changed:
+   a green or red glow around the text that fades out, never a background fill.
+   Part 16's revision of Part 15's original background flash — at a fast tick rate
+   the 400ms flash never fully cleared before the next one retriggered, leaving
+   nearly every numeric cell permanently tinted, and a green background sitting
+   under red (loss) text was illegible. A `text-shadow` glow animates independently
+   of the `color` property, so it never fights with `signColor`'s green/red/neutral
+   text colour underneath. Disabled under prefers-reduced-motion, by skipping
+   straight to the no-glow end state. */
+@keyframes text-pulse-up {
   from {
-    background-color: rgb(52 211 153 / 35%);
+    text-shadow: 0 0 8px rgb(52 211 153 / 90%);
   }
   to {
-    background-color: transparent;
+    text-shadow: 0 0 8px rgb(52 211 153 / 0%);
   }
 }
 
-@keyframes flash-down {
+@keyframes text-pulse-down {
   from {
-    background-color: rgb(248 113 113 / 35%);
+    text-shadow: 0 0 8px rgb(248 113 113 / 90%);
   }
   to {
-    background-color: transparent;
+    text-shadow: 0 0 8px rgb(248 113 113 / 0%);
   }
 }
 
-.flash-up {
-  animation: flash-up 400ms ease-out;
+.text-pulse-up {
+  animation: text-pulse-up 400ms ease-out;
 }
 
-.flash-down {
-  animation: flash-down 400ms ease-out;
+.text-pulse-down {
+  animation: text-pulse-down 400ms ease-out;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .flash-up,
-  .flash-down {
+  .text-pulse-up,
+  .text-pulse-down {
     animation: none;
   }
 }
