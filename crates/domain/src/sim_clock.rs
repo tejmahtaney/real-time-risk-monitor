@@ -15,7 +15,7 @@ use crate::time::{MARKET_TZ, market_date, year_fraction};
 pub const TRADING_SECONDS_PER_YEAR: f64 = 252.0 * 6.5 * 3_600.0;
 
 /// What kind of move a [`ClockStep`] was.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum StepKind {
     /// Time moved forward inside a session and stopped before the close.

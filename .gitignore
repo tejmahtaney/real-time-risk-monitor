@@ -2,6 +2,12 @@
 /target/
 **/*.rs.bk
 
+# ts-rs's default export directory (`./bindings`, relative to whichever crate a test
+# runs in). A plain `cargo test --workspace` — with no `TS_RS_EXPORT_DIR` set — runs
+# every `#[ts(export)]` type's generated test and writes here. The real, intentional
+# output lives at frontend/src/api/generated/ instead, written by `make types`.
+**/bindings/
+
 # Node
 node_modules/
 dist/

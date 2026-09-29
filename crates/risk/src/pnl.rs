@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 /// expansion leaves out, and it grows with step size and near expiry. Every field here
 /// is already scaled to the whole position (or the sum of several), so buckets add
 /// directly across positions, underlyings and ticks.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ts_rs::TS)]
 pub struct PnlBuckets {
     /// Δ·dS·scale.
     pub delta: f64,
@@ -82,7 +82,7 @@ impl AddAssign for PnlBuckets {
 }
 
 /// One level's running P&L: today's session and everything since the attributor started.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ts_rs::TS)]
 pub struct PnlLevel {
     /// Buckets accumulated since the current session opened.
     pub today: PnlBuckets,
@@ -94,7 +94,7 @@ pub struct PnlLevel {
 ///
 /// Only that day's totals are kept, not its own `since_start` or a further `previous_day`,
 /// so this type does not nest indefinitely.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct PreviousDay {
     /// The New York date of the session these totals belong to.
     pub session_date: NaiveDate,
@@ -108,7 +108,8 @@ pub struct PreviousDay {
 
 /// The API-facing P&L attribution report: today and since-start buckets at every level,
 /// the previous session's totals, and the current session date.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct PnlReport {
     /// The New York date of the current session.
     pub session_date: NaiveDate,

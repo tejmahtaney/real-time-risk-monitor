@@ -15,8 +15,9 @@ const MAX_LEN: usize = 10;
 /// The constructor trims surrounding whitespace, upper-cases the input and
 /// checks it is 1 to 10 characters of A to Z, digits, `.` or `-`, so a value
 /// that exists is valid. Deserialising goes through the same check.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ts_rs::TS)]
 #[serde(try_from = "String", into = "String")]
+#[ts(type = "string")]
 pub struct Symbol(String);
 
 impl Symbol {

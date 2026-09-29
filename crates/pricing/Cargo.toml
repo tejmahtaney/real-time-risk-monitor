@@ -12,6 +12,10 @@ workspace = true
 libm = "0.2"
 thiserror.workspace = true
 serde = { workspace = true, optional = true }
+# Generates the TypeScript binding for `Greeks` and `OptionType`, which cross the API
+# embedded in `portfolio::PositionRisk`. See Part 14's notes for why bindings are
+# generated rather than hand-written.
+ts-rs.workspace = true
 
 [features]
 # Serde derives for the plain enums. `BsInputs` is deliberately not deserialisable,

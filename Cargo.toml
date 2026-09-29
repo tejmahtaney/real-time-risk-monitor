@@ -58,6 +58,9 @@ dotenvy = "0.15"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "ansi"] }
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# TypeScript binding generation for the API's wire types (Part 14), so the frontend's
+# types can never silently drift from the Rust structs actually sent over the wire.
+ts-rs = { version = "12", features = ["chrono-impl", "serde-compat"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

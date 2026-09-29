@@ -14,7 +14,7 @@ use crate::summary::RiskSummary;
 const HISTORY_CAPACITY: usize = 200;
 
 /// Which limit a [`LimitStatus`] or [`AlertEvent`] is about.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum LimitKind {
     /// Portfolio |dollar delta|.
@@ -34,7 +34,7 @@ pub enum LimitKind {
 }
 
 /// The whole portfolio, or one underlying.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "kind", content = "symbol", rename_all = "snake_case")]
 pub enum Scope {
     /// The whole book.
@@ -52,7 +52,7 @@ pub enum Scope {
 /// clearing down from `Breach`), it stays at `Warning` or above until utilisation drops
 /// below [`LimitsConfig::warning_clear_threshold`]. Both rules can hold a limit at a
 /// state that its raw utilisation, read alone, would no longer justify.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum LimitState {
     /// Utilisation is below the warning threshold and has never reached it, or a limit
@@ -98,7 +98,8 @@ fn next_state(
 }
 
 /// One limit's status for one scope, at one evaluation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct LimitStatus {
     /// Which limit this is.
     pub name: LimitKind,
@@ -116,7 +117,8 @@ pub struct LimitStatus {
 }
 
 /// One alert: a limit changing state for one scope.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct AlertEvent {
     /// Monotonically increasing within one [`LimitMonitor`], starting at 0.
     pub id: u64,

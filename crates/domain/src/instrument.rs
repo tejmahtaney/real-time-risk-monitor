@@ -16,7 +16,7 @@ fn default_multiplier() -> f64 {
 }
 
 /// The broad kind of an instrument. Shared with the `kind` column of the portfolio CSV.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 pub enum InstrumentKind {
     /// Shares of the underlying.

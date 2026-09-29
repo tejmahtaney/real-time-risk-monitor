@@ -1,0 +1,30 @@
+@import 'tailwindcss';
+
+/* Dark theme by default, with a small set of semantic colour tokens. Tailwind v4
+   reads these as custom utilities (bg-up, text-breach, etc.) via @theme. */
+@theme {
+  --color-up: #34d399;
+  --color-down: #f87171;
+  --color-warning: #fbbf24;
+  --color-breach: #ef4444;
+  --color-neutral: #9ca3af;
+
+  --color-surface: #111827;
+  --color-surface-raised: #1f2937;
+  --color-border: #374151;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-surface);
+  color: #e5e7eb;
+}
+
+/* Numeric columns use tabular figures so digits line up and a column does not
+   jitter as values change tick to tick. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}

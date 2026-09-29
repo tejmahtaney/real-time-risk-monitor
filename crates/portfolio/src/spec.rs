@@ -34,8 +34,9 @@ const COLUMNS: [&str; 8] = [
 ];
 
 /// A strike as written in the file.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(try_from = "String", into = "String")]
+#[ts(type = "string")]
 pub enum StrikeSpec {
     /// A fixed strike in dollars, such as `230`.
     Absolute(f64),
@@ -105,8 +106,9 @@ impl From<StrikeSpec> for String {
 }
 
 /// An expiry as written in the file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(try_from = "String", into = "String")]
+#[ts(type = "string")]
 pub enum ExpirySpec {
     /// A fixed date, `YYYY-MM-DD`.
     Date(NaiveDate),
@@ -167,7 +169,8 @@ impl From<ExpirySpec> for String {
 }
 
 /// One portfolio row before it is resolved against a market.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct PositionSpec {
     /// Unique id.
     pub id: PositionId,

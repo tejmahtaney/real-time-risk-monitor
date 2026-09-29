@@ -13,8 +13,9 @@ const MAX_ID_LEN: usize = 64;
 /// A unique name for a position, such as `spy-put-hedge`.
 ///
 /// Trimmed, 1 to 64 characters. Deserialising goes through the same check.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ts_rs::TS)]
 #[serde(try_from = "String", into = "String")]
+#[ts(type = "string")]
 pub struct PositionId(String);
 
 impl PositionId {

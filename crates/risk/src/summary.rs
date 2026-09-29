@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// are meaningful here and nowhere above. Every other measure is in dollars.
 /// An underlying with only expired positions still appears, with zero risk and
 /// its realised P&L.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ts_rs::TS)]
 pub struct UnderlyingRisk {
     /// The spot the positions were valued at. For an underlying with only expired positions, the settlement spot.
     pub spot: f64,
@@ -50,7 +50,7 @@ pub struct UnderlyingRisk {
 /// another is not 200 of anything. Because the type has nowhere to put them,
 /// nobody can sum shares across underlyings by accident. Dollar delta and dollar
 /// gamma are in one currency and do add.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ts_rs::TS)]
 pub struct PortfolioTotals {
     /// Net dollar delta, Σ share delta × spot over underlyings. A 1 % move in every stock changes value by about 1 % of this.
     pub dollar_delta: f64,
@@ -75,7 +75,7 @@ pub struct PortfolioTotals {
 }
 
 /// One underlying's share of the portfolio's gross exposure.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct Concentration {
     /// The underlying.
     pub symbol: Symbol,
@@ -86,7 +86,8 @@ pub struct Concentration {
 }
 
 /// The result of aggregating a book.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RiskSummary {
     /// Risk per underlying, in symbol order.
     pub by_underlying: BTreeMap<Symbol, UnderlyingRisk>,

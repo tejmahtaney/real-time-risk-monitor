@@ -39,7 +39,8 @@ pub fn router() -> Router<AppState> {
         .route("/api/market-data/archive", get(market_data_archive))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct StorageUsageResponse {
     usage_bytes: BTreeMap<String, u64>,
     total_bytes: u64,
@@ -76,7 +77,8 @@ fn load_session_meta(
     Ok((dir, meta))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct SessionSummary {
     id: String,
     start: DateTime<Utc>,
@@ -116,7 +118,8 @@ async fn list_sessions(
     Ok(Json(out))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct SessionDetail {
     meta: SessionMeta,
     daily_pnl: Vec<DailyPnlRow>,
@@ -243,7 +246,8 @@ fn event_type_tag(event: &SessionEvent) -> &'static str {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct VersionSummary {
     file: String,
     size_bytes: u64,
@@ -266,12 +270,14 @@ async fn list_versions(
     Ok(Json(out))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
+#[ts(export)]
 struct SaveVersionRequest {
     name: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct SavedVersionResponse {
     file: String,
 }
@@ -318,7 +324,8 @@ async fn get_version(
     Ok((headers, bytes))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct LoadedVersionResponse {
     position_count: usize,
 }
@@ -355,14 +362,16 @@ async fn load_version(
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct ArchiveFileInfo {
     file: String,
     fetched_at: DateTime<Utc>,
     size_bytes: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct SymbolArchive {
     symbol: String,
     files: Vec<ArchiveFileInfo>,

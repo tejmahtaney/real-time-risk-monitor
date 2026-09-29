@@ -9,7 +9,7 @@ use risk::{AlertEvent, LimitStatus, PnlBuckets, PnlReport, RiskSummary};
 use serde::{Deserialize, Serialize};
 
 /// Whether the feed is producing usable data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum FeedStatus {
     /// The last tick's feed step and market update both succeeded.
@@ -24,7 +24,7 @@ pub enum FeedStatus {
 
 /// One underlying's market data for a snapshot: spot, vol and the change since the
 /// session's open.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct SymbolSnapshot {
     /// The symbol.
     pub symbol: Symbol,
@@ -38,7 +38,8 @@ pub struct SymbolSnapshot {
 
 /// An immutable snapshot of the whole engine's state at one tick, published on the
 /// `watch` channel. Building one is the last step of [`crate::Engine::tick`].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RiskSnapshot {
     /// Monotonically increasing tick counter, starting at 0. Increments on every tick,
     /// including a degraded one.
@@ -84,7 +85,8 @@ pub struct RiskSnapshot {
 
 /// One tick's worth of portfolio-level risk, kept in the engine's bounded history ring
 /// buffer for charting. A thin projection of [`RiskSnapshot`], not the whole thing.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct HistoryPoint {
     /// Same value as the [`RiskSnapshot`] this point was built from, so a client can
     /// correlate history points with the `seq` it sees on live `snapshot` messages.

@@ -44,8 +44,9 @@ const MAX_HZ: f64 = 10.0;
 static NEXT_CLIENT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// One message this server sends over `/ws`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
 enum ServerMessage {
     /// Sent first, once, right after the socket upgrades.
     Hello {
@@ -83,8 +84,9 @@ enum ServerMessage {
 }
 
 /// One message a client may send over `/ws`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
 enum ClientMessage {
     /// Caps how often `snapshot` messages are sent to this connection.
     Subscribe {

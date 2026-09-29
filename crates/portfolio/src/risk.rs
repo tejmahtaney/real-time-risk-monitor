@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 /// Only the dollar measures add across underlyings. Share delta and share
 /// gamma are counts of shares of one stock, which do not add to another
 /// stock's, so they are meaningful per underlying only.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ts_rs::TS)]
 pub struct ReportingGreeks {
     /// Delta × quantity × multiplier: shares of the underlying the position behaves like.
     pub share_delta: f64,
@@ -71,7 +71,7 @@ impl ReportingGreeks {
 }
 
 /// Where a position stands.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "state", rename_all = "lowercase")]
 pub enum PositionStatus {
     /// Valued normally.
@@ -90,7 +90,8 @@ pub enum PositionStatus {
 /// When `status` is [`PositionStatus::Error`] the derived numbers (spot, vol,
 /// time to expiry, mark, market value, P&L and every Greek) are zero and
 /// consumers must check the status first. Nothing here is ever NaN.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct PositionRisk {
     /// The position's id.
     pub id: PositionId,
@@ -142,7 +143,7 @@ pub struct Settlement {
 }
 
 /// A record that an option was settled, returned by `PositionBook::settle_expired`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 pub struct SettlementEvent {
     /// The settled position.
     pub position_id: PositionId,

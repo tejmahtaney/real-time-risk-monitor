@@ -24,6 +24,7 @@ tokio-util = { workspace = true }
 csv = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
+ts-rs = { workspace = true }
 
 [dev-dependencies]
 approx.workspace = true

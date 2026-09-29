@@ -62,7 +62,8 @@ pub fn router(state: AppState) -> Router {
 }
 
 /// `GET /api/health` response body.
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct HealthResponse {
     status: &'static str,
     version: &'static str,
@@ -98,7 +99,8 @@ async fn list_positions(State(state): State<AppState>) -> Json<Vec<PositionRisk>
 }
 
 /// `GET /api/greeks` response body.
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct GreeksResponse {
     by_underlying: std::collections::BTreeMap<engine::Symbol, UnderlyingRisk>,
     totals: PortfolioTotals,
@@ -113,7 +115,8 @@ async fn greeks(State(state): State<AppState>) -> Json<GreeksResponse> {
 }
 
 /// `GET /api/risk-summary` response body.
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct RiskSummaryResponse {
     totals: PortfolioTotals,
     concentration: Vec<Concentration>,
@@ -136,7 +139,8 @@ async fn pnl(State(state): State<AppState>) -> Json<PnlReport> {
 }
 
 /// `GET /api/alerts` response body.
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 struct AlertsResponse {
     active: Vec<LimitStatus>,
     history: Vec<AlertEvent>,
@@ -220,8 +224,9 @@ async fn history(
 }
 
 /// The JSON body `POST /api/control` accepts.
-#[derive(Deserialize)]
+#[derive(Deserialize, ts_rs::TS)]
 #[serde(tag = "action", rename_all = "snake_case")]
+#[ts(export)]
 enum ControlRequest {
     Pause,
     Resume,

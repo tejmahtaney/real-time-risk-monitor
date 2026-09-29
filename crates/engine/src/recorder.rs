@@ -47,7 +47,8 @@ pub(crate) const RECORDER_CHANNEL_CAPACITY: usize = 10_000;
 /// place at shutdown with `end` set and the final `dropped_records`. A session whose
 /// `end` is `None` was cut short (crash, `kill -9`) — readers must treat that as "still
 /// running," never as a parse error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct SessionMeta {
     /// This session's id: a UTC start time plus a short random suffix.
     pub session_id: String,
@@ -67,7 +68,7 @@ pub struct SessionMeta {
 }
 
 /// Whether a position was added to or removed from the book.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 pub enum PositionChangeKind {
     /// The position was added.
@@ -77,7 +78,7 @@ pub enum PositionChangeKind {
 }
 
 /// A pause, resume or speed change applied to the engine.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum ControlAction {
     /// Simulated time stopped advancing.
@@ -94,8 +95,9 @@ pub enum ControlAction {
 /// One entry in `sessions/<id>/events.jsonl`: an alert, a settlement, a position
 /// change, a portfolio load, or a control action. Tagged by `type`, so `GET
 /// /api/sessions/{id}/events?type=` can filter on the wire shape directly.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
 pub enum SessionEvent {
     /// A limit's state changed.
     Alert(AlertEvent),
@@ -135,7 +137,8 @@ pub enum SessionEvent {
 }
 
 /// One row of `sessions/<id>/daily-pnl.csv`: every P&L bucket for one simulated day.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct DailyPnlRow {
     /// The New York date this row covers.
     pub session_date: NaiveDate,

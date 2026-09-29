@@ -12,7 +12,7 @@ use crate::normal;
 ///
 /// In every formula below φ is the standard normal pdf, N the standard normal
 /// cdf, and d1 and d2 are as in [`price`](crate::price).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, ts_rs::TS)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Greeks {
     /// Black-Scholes-Merton price, identical to [`price`](crate::price).
