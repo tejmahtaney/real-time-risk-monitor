@@ -1,4 +1,4 @@
-.PHONY: fmt lint test check run snapshot history
+.PHONY: fmt lint test check run snapshot history storage-usage
 
 fmt:
 	cargo fmt --all
@@ -30,3 +30,7 @@ snapshot:
 
 history:
 	git log --oneline --decorate -n 30
+
+# Prints disk usage by top-level storage folder (market-data, portfolios, sessions, ...).
+storage-usage:
+	@cargo run --quiet --example storage_usage -p storage

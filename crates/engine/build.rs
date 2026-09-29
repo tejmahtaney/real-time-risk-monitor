@@ -17,5 +17,16 @@ fn main() {
     if let Some(hash) = hash {
         println!("cargo:rustc-env=RRM_GIT_COMMIT_BUILD_TIME={hash}");
     }
+
+    // `.git/HEAD` itself only changes on a branch switch, not a commit (it just holds
+    // `ref: refs/heads/<branch>`), so watching it alone means a rebuild never notices
+    // a new commit on the same branch. Also watch the ref file HEAD points at, which
+    // does change on every commit; a detached HEAD has no such ref and rebuilds only
+    // on the (already-watched) commit-hash-holding HEAD file itself.
     println!("cargo:rerun-if-changed=../../.git/HEAD");
+    if let Ok(head) = std::fs::read_to_string("../../.git/HEAD")
+        && let Some(ref_path) = head.trim().strip_prefix("ref: ")
+    {
+        println!("cargo:rerun-if-changed=../../.git/{ref_path}");
+    }
 }
