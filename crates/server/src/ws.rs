@@ -95,13 +95,13 @@ enum ClientMessage {
     },
 }
 
-/// `GET /ws`: upgrades the connection and hands it to [`run`].
+/// `GET /ws`: upgrades the connection and streams the live engine.
 pub async fn handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(move |socket| run(socket, state))
 }
 
 /// Logs connect/disconnect and keeps [`AppState::ws_clients`] accurate across every
-/// exit path from [`run`] (a `break`, an early `return`, or the task simply ending
+/// exit path from [`stream`] (a `break`, an early `return`, or the task simply ending
 /// when the server shuts down).
 struct ConnectionGuard {
     id: u64,
@@ -123,21 +123,57 @@ impl Drop for ConnectionGuard {
     }
 }
 
-/// Drives one client's connection until it closes, the engine goes away, or the
-/// server shuts down. Axum's own graceful shutdown drains in-flight connections, so
-/// no extra `CancellationToken` needs to be threaded in here.
-async fn run(mut socket: WebSocket, state: AppState) {
-    let id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
-    let _guard = ConnectionGuard::new(id, Arc::clone(&state.ws_clients));
+/// What [`stream`] needs to serve one client: the two receivers it forwards, and the two numbers
+/// the `hello` message carries. `/ws` fills it from the live engine and `/ws/backtests/{id}` from
+/// a replay, so both speak exactly the same protocol and the frontend client is shared.
+pub(crate) struct StreamSource {
+    /// The latest snapshot. A `watch` receiver, so a slow client skips ticks instead of queueing.
+    pub snapshot_rx: watch::Receiver<Arc<RiskSnapshot>>,
+    /// Alert events as they happen.
+    pub alert_rx: broadcast::Receiver<AlertEvent>,
+    /// Real milliseconds between snapshots, as told to the client in `hello`.
+    pub tick_interval_ms: u64,
+    /// The clock's speed when the client connected, as told to the client in `hello`.
+    pub speed: f64,
+}
 
-    let mut snapshot_rx = state.engine.subscribe_snapshots();
-    let mut alert_rx = state.engine.subscribe_alerts();
+/// Serves the live engine to one client.
+async fn run(socket: WebSocket, state: AppState) {
+    let snapshot_rx = state.engine.subscribe_snapshots();
+    let speed = snapshot_rx.borrow().clock_speed;
+    let source = StreamSource {
+        snapshot_rx,
+        alert_rx: state.engine.subscribe_alerts(),
+        tick_interval_ms: state.tick_interval_ms,
+        speed,
+    };
+    stream(socket, Arc::clone(&state.ws_clients), source).await;
+}
+
+/// Drives one client's connection until it closes, the source goes away, or the
+/// server shuts down: `hello`, the current snapshot, then every change and alert, with the
+/// client's throttle, ping and pong handling. Axum's own graceful shutdown drains in-flight
+/// connections, so no extra `CancellationToken` needs to be threaded in here.
+pub(crate) async fn stream(
+    mut socket: WebSocket,
+    ws_clients: Arc<AtomicUsize>,
+    source: StreamSource,
+) {
+    let id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
+    let _guard = ConnectionGuard::new(id, ws_clients);
+
+    let StreamSource {
+        mut snapshot_rx,
+        mut alert_rx,
+        tick_interval_ms,
+        speed,
+    } = source;
 
     let hello = ServerMessage::Hello {
         protocol_version: PROTOCOL_VERSION,
         server_version: env!("CARGO_PKG_VERSION"),
-        tick_interval_ms: state.tick_interval_ms,
-        speed: snapshot_rx.borrow().clock_speed,
+        tick_interval_ms,
+        speed,
     };
     if !send_json(&mut socket, &hello).await {
         return;

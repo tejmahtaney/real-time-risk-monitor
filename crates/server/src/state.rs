@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::time::Instant;
 
-use engine::{EngineHandle, StorageRoot};
+use engine::{BacktestManager, EngineHandle, StorageRoot};
 
 use crate::config::ServerConfig;
 use crate::storage_config::StorageConfig;
@@ -32,4 +32,7 @@ pub struct AppState {
     pub tick_interval_ms: u64,
     /// Count of currently connected WebSocket clients, surfaced on `/api/health`.
     pub ws_clients: Arc<AtomicUsize>,
+    /// The backtester (Part 20): creates runs, holds the unfinished ones in memory, and reads
+    /// saved ones from `backtests/`.
+    pub backtests: Arc<BacktestManager>,
 }

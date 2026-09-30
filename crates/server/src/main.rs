@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use engine::{
-    AlphaVantageSource, Archive, CorporateActionCalendar, CorporateActionState,
-    CorporateActionsConfig, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL, Engine, GbmSimulator,
-    HistoryLoader, LimitsConfig, MarketConfig, PositionSpec, RiskConfig, SimClock,
-    SimulationConfig, StorageRoot, SystemClock, apply_ledger_to_seed, calibrate, load_csv,
-    market_date,
+    AlphaVantageSource, Archive, BacktestConfig, BacktestManager, CorporateActionCalendar,
+    CorporateActionState, CorporateActionsConfig, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL,
+    Engine, GbmSimulator, HistoryLoader, LimitsConfig, MarketConfig, PositionSpec, RiskConfig,
+    SimClock, SimulationConfig, StorageRoot, SystemClock, apply_ledger_to_seed, calibrate,
+    load_csv, market_date,
 };
 use server::{AppState, ServerConfig, StartPortfolio, StorageConfig, build_router};
 use tokio_util::sync::CancellationToken;
@@ -68,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
         &seed,
         feed,
         &specs,
-        limits,
+        limits.clone(),
         Box::new(SystemClock),
         config.history_capacity,
         sim_config.seed,
@@ -77,18 +77,7 @@ async fn main() -> anyhow::Result<()> {
     )
     .context("building the engine")?;
 
-    // The two pieces of one-time startup I/O session construction used to do itself:
-    // copy this session's config files, and save the (possibly just-loaded) starting
-    // book as the automatic `session-start` version. Neither the engine struct nor its
-    // tick-loop task ever touches disk — see `engine::recorder`'s doc comment.
-    engine::copy_session_config(
-        &storage_root,
-        engine.session_id(),
-        &session_config_paths(&config),
-    )
-    .context("copying this session's config files")?;
-    save_session_start_version(&storage_root, &engine.active_specs())
-        .context("saving the automatic session-start portfolio version")?;
+    record_session_start(&config, &storage_root, &engine)?;
 
     let shutdown = CancellationToken::new();
     let (handle, engine_task) = engine.spawn(
@@ -106,6 +95,15 @@ async fn main() -> anyhow::Result<()> {
         shutdown.clone(),
     ));
 
+    let backtests = Arc::new(BacktestManager::new(backtest_config(
+        &config,
+        &market,
+        &limits,
+        risk_config.headline_var_method,
+        &storage_root,
+    )?));
+    let janitor = backtests.spawn_janitor(Duration::from_secs(30), shutdown.clone());
+
     let app_state = AppState {
         engine: handle,
         config: config.clone(),
@@ -115,6 +113,7 @@ async fn main() -> anyhow::Result<()> {
         started_at: Instant::now(),
         tick_interval_ms: sim_config.tick_interval_ms,
         ws_clients: Arc::new(AtomicUsize::new(0)),
+        backtests: Arc::clone(&backtests),
     };
     let router = build_router(app_state);
 
@@ -129,16 +128,76 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("serving")?;
 
-    // Graceful shutdown above only means axum stopped accepting new work; the engine
-    // task (and, inside it, the session recorder) reacts to the same cancellation
-    // independently. Awaiting it here is what actually makes "stop the engine, drain,
-    // flush, write the final meta.json, then exit" happen in that order before the
-    // process ends.
+    finish(engine_task, janitor, &backtests).await;
+
+    Ok(())
+}
+
+/// The two pieces of one-time startup I/O session construction used to do itself: copy this
+/// session's config files, and save the (possibly just-loaded) starting book as the automatic
+/// `session-start` version. Neither the engine struct nor its tick-loop task ever touches disk,
+/// see `engine::recorder`'s doc comment.
+fn record_session_start(
+    config: &ServerConfig,
+    storage_root: &StorageRoot,
+    engine: &Engine<GbmSimulator>,
+) -> anyhow::Result<()> {
+    engine::copy_session_config(
+        storage_root,
+        engine.session_id(),
+        &session_config_paths(config),
+    )
+    .context("copying this session's config files")?;
+    save_session_start_version(storage_root, &engine.active_specs())
+        .context("saving the automatic session-start portfolio version")
+}
+
+/// Waits for the background tasks to stop, in order, after the server has.
+///
+/// Graceful shutdown only means axum stopped accepting new work; the engine task (and, inside it,
+/// the session recorder) reacts to the same cancellation independently. Awaiting it is what makes
+/// "stop the engine, drain, flush, write the final meta.json, then exit" happen in that order
+/// before the process ends. Backtests then stop their replays and let their recorders finish.
+async fn finish(
+    engine_task: tokio::task::JoinHandle<()>,
+    janitor: tokio::task::JoinHandle<()>,
+    backtests: &BacktestManager,
+) {
     if let Err(err) = engine_task.await {
         tracing::error!(error = %err, "the engine task panicked during shutdown");
     }
+    let _ = janitor.await;
+    backtests.shutdown().await;
+}
 
-    Ok(())
+/// What the backtester needs from the loaded configuration: the market, limits and `VaR` method,
+/// the corporate-action config, the sample portfolio it always starts from, and the config files
+/// to copy into each run's folder.
+fn backtest_config(
+    config: &ServerConfig,
+    market: &MarketConfig,
+    limits: &LimitsConfig,
+    headline_var_method: engine::VarMethod,
+    storage_root: &StorageRoot,
+) -> anyhow::Result<BacktestConfig> {
+    Ok(BacktestConfig {
+        storage: storage_root.clone(),
+        market: market.clone(),
+        limits: limits.clone(),
+        headline_var_method,
+        corporate_actions: CorporateActionsConfig::load(&config.corporate_actions_path)
+            .context("loading the corporate actions config for backtests")?,
+        portfolio_path: config.portfolio_path.clone(),
+        config_paths: vec![
+            config.market_config_path.clone(),
+            config.limits_config_path.clone(),
+            config.risk_config_path.clone(),
+            config.corporate_actions_path.clone(),
+            config.portfolio_path.clone(),
+        ],
+        max_running: BacktestConfig::DEFAULT_MAX_RUNNING,
+        idle_after: BacktestConfig::DEFAULT_IDLE_AFTER,
+    })
 }
 
 /// `risk-monitor --healthcheck`: a bare TCP `GET /api/health` against this same

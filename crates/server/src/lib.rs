@@ -3,6 +3,7 @@
 
 #![warn(missing_docs)]
 
+mod backtest_routes;
 mod config;
 mod error;
 mod routes;

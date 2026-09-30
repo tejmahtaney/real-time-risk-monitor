@@ -21,9 +21,9 @@ use axum::body::Body;
 use axum::http::Request;
 use chrono::{TimeZone, Utc};
 use engine::{
-    DataSource, Engine, FixedClock, GbmSimulator, InstrumentKind, LimitsConfig, PositionId,
-    PositionSpec, SeedData, SimClock, SimulationConfig, StorageRoot, Symbol, SymbolSeed, VarMethod,
-    VolProcessConfig,
+    BacktestConfig, BacktestManager, CorporateActionsConfig, DataSource, Engine, FixedClock,
+    GbmSimulator, InstrumentKind, LimitsConfig, MarketConfig, PositionId, PositionSpec, SeedData,
+    SimClock, SimulationConfig, StorageRoot, Symbol, SymbolSeed, VarMethod, VolProcessConfig,
 };
 use serde_json::Value;
 use server::{AppState, ServerConfig, StartPortfolio, StorageConfig, build_router};
@@ -140,6 +140,46 @@ pub fn temp_storage() -> (tempfile::TempDir, StorageRoot) {
     (dir, root)
 }
 
+/// The one-position portfolio every backtest fixture starts from, written once to a file outside
+/// the repo and outside any storage folder: a SPY stock row and a SPY call.
+pub fn backtest_portfolio_path() -> PathBuf {
+    static PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        let path = std::env::temp_dir().join(format!(
+            "rrm-server-tests-backtest-portfolio-{}.csv",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            "id,underlying,kind,strike,expiry,quantity,entry_price,iv\n\
+             stock,SPY,equity,,,100,,\n\
+             call,SPY,call,ATM,+30d,2,,\n",
+        )
+        .unwrap();
+        path
+    })
+    .clone()
+}
+
+/// A backtest config over the repo's real config files, the fixture portfolio and `storage_root`.
+pub fn backtest_config(storage_root: &StorageRoot) -> BacktestConfig {
+    let root = repo_root();
+    BacktestConfig {
+        storage: storage_root.clone(),
+        market: MarketConfig::load(&root.join("config/market.toml")).unwrap(),
+        limits: LimitsConfig::load(&root.join("config/limits.toml")).unwrap(),
+        headline_var_method: VarMethod::DeltaGammaMc,
+        corporate_actions: CorporateActionsConfig::load(
+            &root.join("config/corporate_actions.toml"),
+        )
+        .unwrap(),
+        portfolio_path: backtest_portfolio_path(),
+        config_paths: vec![root.join("config/market.toml"), backtest_portfolio_path()],
+        max_running: BacktestConfig::DEFAULT_MAX_RUNNING,
+        idle_after: BacktestConfig::DEFAULT_IDLE_AFTER,
+    }
+}
+
 /// Builds a fresh router over a freshly spawned, fast fixture engine, using the real
 /// `config/limits.toml` and a 20 ms tick interval. Use [`test_router_with`] directly
 /// when a test needs its own `LimitsConfig` or tick rate (deterministically triggering
@@ -184,6 +224,7 @@ pub fn test_router_with_config(
     )
     .unwrap();
     let (dir, storage_root) = temp_storage();
+    let storage_root_for_backtests = storage_root.clone();
     let (handle, _join) = engine.spawn(
         tick_interval,
         storage_root.clone(),
@@ -199,6 +240,9 @@ pub fn test_router_with_config(
         #[allow(clippy::cast_possible_truncation)]
         tick_interval_ms: tick_interval.as_millis() as u64,
         ws_clients: Arc::new(AtomicUsize::new(0)),
+        backtests: Arc::new(BacktestManager::new(backtest_config(
+            &storage_root_for_backtests,
+        ))),
     };
     (build_router(state), dir)
 }

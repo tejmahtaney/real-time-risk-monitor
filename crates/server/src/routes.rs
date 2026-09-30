@@ -23,10 +23,10 @@ use tower_http::trace::TraceLayer;
 
 use crate::error::ApiError;
 use crate::state::AppState;
-use crate::{storage_routes, ws};
+use crate::{backtest_routes, storage_routes, ws};
 
-/// The maximum size of a request body this server accepts, in bytes. Every route here
-/// takes a small JSON body at most.
+/// The maximum size of a request body most routes accept, in bytes. They take a small JSON body at
+/// most. The backtest upload is the exception, with its own limit in `backtest_routes`.
 const MAX_BODY_BYTES: usize = 64 * 1024;
 
 /// Assembles every route under `/api`, plus tracing, CORS, a request timeout and a
@@ -49,7 +49,9 @@ pub fn router(state: AppState) -> Router {
         .layer(middleware::from_fn(static_cache_headers))
         .service(ServeDir::new(static_dir).fallback(ServeFile::new(index)));
 
-    Router::new()
+    // Every route but the price-file upload takes only a small JSON body, so it sits under the
+    // small limit. The upload is merged after that layer, with its own 5 MB limit.
+    let small_bodies = Router::new()
         .route("/api/health", get(health))
         .route("/api/positions", get(list_positions).post(add_position))
         .route("/api/positions/{id}", delete(remove_position))
@@ -68,6 +70,12 @@ pub fn router(state: AppState) -> Router {
         // order.
         .route("/api/{*rest}", any(api_not_found))
         .merge(storage_routes::router())
+        .merge(backtest_routes::router())
+        .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES));
+
+    Router::new()
+        .merge(small_bodies)
+        .merge(backtest_routes::upload_router())
         .with_state(state)
         // Everything that is not `/api/...` or `/ws` falls here: the built frontend,
         // with any unmatched client-side route (e.g. a deep link) falling back to
@@ -79,7 +87,6 @@ pub fn router(state: AppState) -> Router {
             StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(5),
         ))
-        .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
 }
 
 async fn api_not_found() -> ApiError {

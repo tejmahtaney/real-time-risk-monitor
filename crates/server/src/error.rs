@@ -3,7 +3,9 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use engine::{DomainError, EngineCommandError, EngineError, PortfolioError, StorageError};
+use engine::{
+    BacktestError, DomainError, EngineCommandError, EngineError, PortfolioError, StorageError,
+};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -25,6 +27,12 @@ pub enum ApiError {
     /// `Validation`) or a missing file (see `NotFound`). 503.
     #[error("{0}")]
     Storage(String),
+    /// The request body is bigger than this route accepts, such as a price file over 5 MB. 413.
+    #[error("{0}")]
+    PayloadTooLarge(String),
+    /// A limit on concurrent work is reached, such as two backtests already running. 429.
+    #[error("{0}")]
+    TooManyRequests(String),
 }
 
 #[derive(Serialize)]
@@ -45,6 +53,8 @@ impl ApiError {
             Self::NotFound(_) => "not_found",
             Self::EngineUnavailable(_) => "engine_unavailable",
             Self::Storage(_) => "storage_error",
+            Self::PayloadTooLarge(_) => "payload_too_large",
+            Self::TooManyRequests(_) => "too_many_requests",
         }
     }
 
@@ -53,6 +63,8 @@ impl ApiError {
             Self::Validation(_) => StatusCode::BAD_REQUEST,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::EngineUnavailable(_) | Self::Storage(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::PayloadTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::TooManyRequests(_) => StatusCode::TOO_MANY_REQUESTS,
         }
     }
 }
@@ -121,5 +133,22 @@ impl From<PortfolioError> for ApiError {
         // `EngineCommand`, so `From<EngineCommandError>` above does not apply) — a bad
         // file on disk reads like a bad request.
         Self::Validation(err.to_string())
+    }
+}
+
+impl From<BacktestError> for ApiError {
+    fn from(err: BacktestError) -> Self {
+        match err {
+            BacktestError::Invalid(_)
+            | BacktestError::Data(_)
+            | BacktestError::Actions(_)
+            | BacktestError::Portfolio(_)
+            | BacktestError::Engine(_)
+            | BacktestError::Archive(_) => Self::Validation(err.to_string()),
+            BacktestError::NotFound(_) => Self::NotFound(err.to_string()),
+            BacktestError::TooManyRunning { .. } => Self::TooManyRequests(err.to_string()),
+            BacktestError::Storage(storage) => storage.into(),
+            BacktestError::Internal(_) => Self::Storage(err.to_string()),
+        }
     }
 }
