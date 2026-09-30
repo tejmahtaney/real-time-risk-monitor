@@ -572,7 +572,7 @@ impl VarCalculator {
     }
 
     /// Method 3: historical simulation with full revaluation. For each date in the
-    /// return window (at most [`MAX_HISTORICAL_SCENARIOS`]), shocks every calibrated
+    /// return window (the most recent [`MAX_HISTORICAL_SCENARIOS`] dates at most), shocks every calibrated
     /// symbol's spot by `exp(historical log return)` on that date — vol unchanged
     /// (sticky strike) — and reprices every position with
     /// [`PositionBook::value_all`]. Each scenario's P&L is measured against an
@@ -593,7 +593,11 @@ impl VarCalculator {
         valuation_time: DateTime<Utc>,
     ) -> VarMethodReport {
         let started = Instant::now();
-        let scenario_count = self.return_dates.len().min(MAX_HISTORICAL_SCENARIOS);
+        // The window is the most recent scenarios: with more than the cap of dates, the
+        // oldest are the ones dropped, never the newest.
+        let total_dates = self.return_dates.len();
+        let scenario_count = total_dates.min(MAX_HISTORICAL_SCENARIOS);
+        let first_scenario = total_dates - scenario_count;
 
         if scenario_count == 0 {
             return VarMethodReport {
@@ -618,7 +622,7 @@ impl VarCalculator {
         let symbols_in_book: Vec<&Symbol> = summary.by_underlying.keys().collect();
 
         let mut losses = Vec::with_capacity(scenario_count);
-        for date_index in 0..scenario_count {
+        for date_index in first_scenario..total_dates {
             let mut shocked = market.clone();
             let updates: Vec<(Symbol, f64, f64)> = symbols_in_book
                 .iter()
@@ -645,8 +649,8 @@ impl VarCalculator {
             var_99,
             es_97_5,
             scenario_count,
-            window_start: self.return_dates.first().copied(),
-            window_end: self.return_dates.get(scenario_count - 1).copied(),
+            window_start: self.return_dates.get(first_scenario).copied(),
+            window_end: self.return_dates.last().copied(),
             compute_micros: micros_since(started),
         }
     }
@@ -926,6 +930,70 @@ mod tests {
             es_97_5 >= var_99,
             "ES should never be below VaR at the same level"
         );
+    }
+
+    // Exact zeros are the point: every scenario in the window is a zero return.
+    #[allow(clippy::float_cmp)]
+    #[test]
+    fn a_longer_history_uses_the_most_recent_99_scenarios() {
+        // 120 dates. The 21 oldest returns are a 40 % crash that a long stock position
+        // would feel badly, and the 99 most recent are all zero. Only the recent 99 count,
+        // so every VaR figure is exactly zero. Taking the first 99 would include the crash.
+        let spy = sym("SPY");
+        let market = market_with(&[("SPY", 100.0, 0.20)]);
+        let position = Position::new(
+            PositionId::new("spy-stock").unwrap(),
+            Instrument::Equity {
+                symbol: spy.clone(),
+            },
+            100.0,
+            100.0,
+            None,
+        )
+        .unwrap();
+        let book = PositionBook::from_positions([position]).unwrap();
+        let rows = book.value_all(&market, now());
+        let summary = crate::aggregate::aggregate(&rows);
+        let first_day = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let dates: Vec<NaiveDate> = (0..120).map(|i| first_day + chrono::Days::new(i)).collect();
+        let returns: Vec<Vec<f64>> = (0..120)
+            .map(|i| vec![if i < 21 { -0.5 } else { 0.0 }])
+            .collect();
+
+        let mut calc = VarCalculator::new(
+            vec![spy],
+            vec![vec![1.0]],
+            returns,
+            dates.clone(),
+            VarMethod::Historical,
+        );
+        let report = calc.compute(&summary, &market, &book, now()).historical;
+
+        assert_eq!(report.scenario_count, 99);
+        assert_eq!(report.window_start, Some(dates[21]));
+        assert_eq!(report.window_end, Some(dates[119]));
+        assert_eq!(report.var_99, 0.0);
+        assert_eq!(report.es_97_5, 0.0);
+    }
+
+    #[test]
+    fn a_history_within_the_cap_uses_every_date() {
+        let spy = sym("SPY");
+        let market = market_with(&[("SPY", 100.0, 0.20)]);
+        let book = PositionBook::new();
+        let summary = crate::aggregate::aggregate(&book.value_all(&market, now()));
+        let day = |i| NaiveDate::from_ymd_opt(2026, 3, 1).unwrap() + chrono::Days::new(i);
+        let mut calc = VarCalculator::new(
+            vec![spy],
+            vec![vec![1.0]],
+            vec![vec![0.01], vec![-0.01], vec![0.0]],
+            vec![day(0), day(1), day(2)],
+            VarMethod::Historical,
+        );
+        let report = calc.compute(&summary, &market, &book, now()).historical;
+        assert_eq!(report.scenario_count, 3);
+        assert_eq!(report.window_start, Some(day(0)));
+        assert_eq!(report.window_end, Some(day(2)));
     }
 
     // The unshocked-baseline design (see `compute_historical`'s doc comment) makes a

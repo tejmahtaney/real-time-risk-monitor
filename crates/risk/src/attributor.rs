@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use chrono::NaiveDate;
-use domain::{ClockStep, PositionId, StepKind, Symbol};
+use domain::{ClockStep, InstrumentKind, PositionId, StepKind, Symbol};
 use portfolio::{PositionRisk, PositionStatus};
 
 use crate::pnl::{PnlBuckets, PnlLevel, PnlReport, PreviousDay};
@@ -23,6 +23,18 @@ pub struct PnlAttributor {
     by_underlying: BTreeMap<Symbol, PnlLevel>,
     by_position: BTreeMap<PositionId, PnlLevel>,
     previous_day: Option<PreviousDay>,
+    /// Dividends that went ex since the last tick, waiting for the next [`on_tick`](Self::on_tick).
+    pending_dividends: Vec<PendingDividend>,
+}
+
+/// A cash dividend noted with [`PnlAttributor::note_dividend`], waiting for the next tick.
+#[derive(Debug, Clone)]
+struct PendingDividend {
+    symbol: Symbol,
+    /// Cash per share, which is also how far the spot dropped.
+    amount: f64,
+    /// Cash paid to each stock position: `(id, quantity × amount)`.
+    payments: Vec<(PositionId, f64)>,
 }
 
 impl PnlAttributor {
@@ -35,7 +47,50 @@ impl PnlAttributor {
             by_underlying: BTreeMap::new(),
             by_position: BTreeMap::new(),
             previous_day: None,
+            pending_dividends: Vec::new(),
         }
+    }
+
+    /// Replaces the stored previous valuation of the given positions, so a corporate action
+    /// that changed their terms shows no false P&L on the next tick.
+    ///
+    /// `rows` must be the *previous tick* revalued under the adjusted terms, not the
+    /// post-action valuation: after a split the engine values the adjusted book at the
+    /// previous tick's time and with the previous tick's prices in post-split units. The next
+    /// [`on_tick`](Self::on_tick) then diffs against a like-for-like row and reports only what
+    /// really happened, such as the overnight decay. Rows that are not active, and positions
+    /// the attributor has not seen, are ignored.
+    pub fn rebase(&mut self, rows: &[PositionRisk]) {
+        for row in rows {
+            if row.status == PositionStatus::Active
+                && let Some(slot) = self.previous.get_mut(&row.id)
+            {
+                *slot = row.clone();
+            }
+        }
+    }
+
+    /// Notes that a cash dividend of `amount` per share went ex, paying `payments` to stock
+    /// positions, to be attributed by the next [`on_tick`](Self::on_tick).
+    ///
+    /// Two things happen there. The cash lands in the `dividends` bucket and in `actual`, after
+    /// any day roll, so it belongs to the ex-date's session. And for **options** on the symbol
+    /// the spot move is taken net of the drop: an option on a discrete-dividend stock is priced
+    /// from S* = S − PV(D), so when the dividend goes ex, spot falls by D but S* barely moves
+    /// (the escrow simply empties). Attributing Δ × (−D) to delta would leave a residual of the
+    /// same size, so their spot move for the tick is dS + D. A stock's price drop is left as it
+    /// is, in `delta`.
+    pub fn note_dividend(
+        &mut self,
+        symbol: &Symbol,
+        amount: f64,
+        payments: Vec<(PositionId, f64)>,
+    ) {
+        self.pending_dividends.push(PendingDividend {
+            symbol: symbol.clone(),
+            amount,
+            payments,
+        });
     }
 
     /// Attributes one tick's P&L from `positions`, the valuation at the end of `step`, against
@@ -60,7 +115,16 @@ impl PnlAttributor {
                 continue;
             }
             if let Some(prev) = self.previous.get(&row.id) {
-                let buckets = attribute_position(prev, row, step);
+                let ex_drop = if prev.kind == InstrumentKind::Equity {
+                    0.0
+                } else {
+                    self.pending_dividends
+                        .iter()
+                        .filter(|d| d.symbol == row.underlying)
+                        .map(|d| d.amount)
+                        .sum()
+                };
+                let buckets = attribute_position(prev, row, step, ex_drop);
                 self.accumulate(row.id.clone(), row.underlying.clone(), buckets);
             }
             if row.status == PositionStatus::Active {
@@ -68,6 +132,16 @@ impl PnlAttributor {
             }
         }
         self.previous = next_previous;
+        for dividend in std::mem::take(&mut self.pending_dividends) {
+            for (id, cash) in dividend.payments {
+                let buckets = PnlBuckets {
+                    dividends: cash,
+                    actual: cash,
+                    ..PnlBuckets::default()
+                };
+                self.accumulate(id, dividend.symbol.clone(), buckets);
+            }
+        }
     }
 
     /// The current attribution report.
@@ -127,9 +201,18 @@ impl PnlAttributor {
 /// real `prev.vol` would invent a vol crash that never happened. Forcing dσ to zero there
 /// leaves the option's whole time-value collapse in the residual, which is where the prompt
 /// says it belongs: the residual is expected to grow near expiry.
-fn attribute_position(prev: &PositionRisk, curr: &PositionRisk, step: &ClockStep) -> PnlBuckets {
+///
+/// `ex_drop` is the total cash dividend that went ex on this option's underlying during the
+/// tick, added back to the spot move (see [`PnlAttributor::note_dividend`]). It is zero for
+/// stock and when no dividend went ex.
+fn attribute_position(
+    prev: &PositionRisk,
+    curr: &PositionRisk,
+    step: &ClockStep,
+    ex_drop: f64,
+) -> PnlBuckets {
     let scale = prev.quantity * prev.multiplier;
-    let d_spot = curr.spot - prev.spot;
+    let d_spot = curr.spot - prev.spot + ex_drop;
     let d_vol = if curr.status == PositionStatus::Expired {
         0.0
     } else {
@@ -156,6 +239,7 @@ fn attribute_position(prev: &PositionRisk, curr: &PositionRisk, step: &ClockStep
         theta,
         rho,
         higher_order,
+        dividends: 0.0,
         residual: 0.0,
         actual,
     };
@@ -275,7 +359,7 @@ mod tests {
         let dt = 1.0 / 365.0;
         let t1 = base_call(100.0, 0.20, 0.5 - dt);
         let step = intraday(dt);
-        let buckets = attribute_position(&t0, &t1, &step);
+        let buckets = attribute_position(&t0, &t1, &step, 0.0);
 
         assert_abs_diff_eq!(buckets.delta, 0.0);
         assert_abs_diff_eq!(buckets.gamma, 0.0);
@@ -303,8 +387,12 @@ mod tests {
         // (1/6)*V'''(S0)*dS^3 plus higher terms, so it scales with the cube of the move.
         let full_move = base_call(105.0, 0.20, 0.5);
         let half_move = base_call(102.5, 0.20, 0.5);
-        let full_residual = attribute_position(&t0, &full_move, &step).residual.abs();
-        let half_residual = attribute_position(&t0, &half_move, &step).residual.abs();
+        let full_residual = attribute_position(&t0, &full_move, &step, 0.0)
+            .residual
+            .abs();
+        let half_residual = attribute_position(&t0, &half_move, &step, 0.0)
+            .residual
+            .abs();
 
         let ratio = full_residual / half_residual;
         assert!((6.0..=10.0).contains(&ratio), "ratio {ratio}");
@@ -315,7 +403,7 @@ mod tests {
         let t0 = base_call(100.0, 0.20, 0.5);
         let t1 = base_call(100.0, 0.21, 0.5);
         let step = intraday(0.0);
-        let buckets = attribute_position(&t0, &t1, &step);
+        let buckets = attribute_position(&t0, &t1, &step, 0.0);
 
         assert_abs_diff_eq!(buckets.delta, 0.0);
         assert_abs_diff_eq!(buckets.gamma, 0.0);
@@ -341,7 +429,7 @@ mod tests {
         let one_big_step = {
             let t0 = base_call(start_spot, vol, time_to_expiry);
             let t1 = base_call(end_spot, vol, time_to_expiry);
-            attribute_position(&t0, &t1, &step).residual.abs()
+            attribute_position(&t0, &t1, &step, 0.0).residual.abs()
         };
 
         let n = 100;
@@ -351,7 +439,7 @@ mod tests {
             let s1 = start_spot + (end_spot - start_spot) * f64::from(i + 1) / f64::from(n);
             let prev = base_call(s0, vol, time_to_expiry);
             let curr = base_call(s1, vol, time_to_expiry);
-            total_small_steps += attribute_position(&prev, &curr, &step).residual.abs();
+            total_small_steps += attribute_position(&prev, &curr, &step, 0.0).residual.abs();
         }
 
         assert!(
@@ -365,7 +453,7 @@ mod tests {
         let t0 = stock_row("s", "AAA", 100.0, 100.0);
         let t1 = stock_row("s", "AAA", 100.0, 103.0);
         let step = intraday(1.0 / 365.0);
-        let buckets = attribute_position(&t0, &t1, &step);
+        let buckets = attribute_position(&t0, &t1, &step, 0.0);
 
         assert_abs_diff_eq!(buckets.gamma, 0.0);
         assert_abs_diff_eq!(buckets.vega, 0.0);
@@ -384,7 +472,7 @@ mod tests {
         let t0 = base_call(100.0, 0.65, 0.5);
         let t1 = base_call(103.0, 0.65, 0.5);
         let step = intraday(0.0);
-        let buckets = attribute_position(&t0, &t1, &step);
+        let buckets = attribute_position(&t0, &t1, &step, 0.0);
 
         assert_abs_diff_eq!(buckets.vega, 0.0);
         assert_abs_diff_eq!(buckets.higher_order, 0.0);
@@ -473,7 +561,7 @@ mod tests {
 
         // The new day's theta must include the overnight gap's theta and nothing from day 1.
         let overnight_only =
-            attribute_position(&before_overnight, &after_overnight, &overnight_step);
+            attribute_position(&before_overnight, &after_overnight, &overnight_step, 0.0);
         assert_abs_diff_eq!(
             report.portfolio.today.theta,
             overnight_only.theta,
@@ -543,5 +631,166 @@ mod tests {
             before_removal.since_start.actual,
             epsilon = 1e-9
         );
+    }
+
+    // ---- Corporate actions ----
+
+    fn stock_buckets(attributor: &PnlAttributor, id_text: &str) -> PnlBuckets {
+        attributor.report().by_position[&id(id_text)].today
+    }
+
+    #[test]
+    fn dividend_cash_offsets_the_price_drop_for_a_stock_holder() {
+        // Long 100 shares. The price drops by the 1.00 dividend and 100 of cash is paid.
+        let mut attributor = PnlAttributor::new(date(2026, 9, 28));
+        attributor.on_tick(&[stock_row("s", "AAA", 100.0, 50.0)], &intraday(0.0));
+        attributor.note_dividend(&sym("AAA"), 1.0, vec![(id("s"), 100.0)]);
+        attributor.on_tick(&[stock_row("s", "AAA", 100.0, 49.0)], &intraday(0.0));
+        let b = stock_buckets(&attributor, "s");
+        assert_abs_diff_eq!(b.delta, -100.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(b.dividends, 100.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(b.actual, 0.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(b.residual, 0.0, epsilon = 1e-9);
+        // The total the holder experienced, price and cash together, is unchanged.
+        assert_abs_diff_eq!(b.explained(), b.actual, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn a_short_holder_pays_the_dividend() {
+        let mut attributor = PnlAttributor::new(date(2026, 9, 28));
+        attributor.on_tick(&[stock_row("s", "AAA", -100.0, 50.0)], &intraday(0.0));
+        attributor.note_dividend(&sym("AAA"), 1.0, vec![(id("s"), -100.0)]);
+        attributor.on_tick(&[stock_row("s", "AAA", -100.0, 49.0)], &intraday(0.0));
+        let b = stock_buckets(&attributor, "s");
+        assert_abs_diff_eq!(b.delta, 100.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(b.dividends, -100.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(b.actual, 0.0, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn dividend_cash_on_an_overnight_tick_belongs_to_the_new_day() {
+        let mut attributor = PnlAttributor::new(date(2026, 9, 28));
+        attributor.on_tick(&[stock_row("s", "AAA", 100.0, 50.0)], &intraday(0.0));
+        attributor.note_dividend(&sym("AAA"), 1.0, vec![(id("s"), 100.0)]);
+        let open = clock_step(0.0, StepKind::Overnight, date(2026, 9, 29));
+        attributor.on_tick(&[stock_row("s", "AAA", 100.0, 49.0)], &open);
+        let report = attributor.report();
+        assert_abs_diff_eq!(report.portfolio.today.dividends, 100.0, epsilon = 1e-9);
+        let previous = report.previous_day.unwrap();
+        assert_abs_diff_eq!(previous.portfolio.dividends, 0.0, epsilon = 1e-12);
+        // The note is spent: a later tick books no second payment.
+        attributor.on_tick(&[stock_row("s", "AAA", 100.0, 49.0)], &intraday(0.0));
+        assert_abs_diff_eq!(
+            attributor.report().portfolio.today.dividends,
+            100.0,
+            epsilon = 1e-9
+        );
+    }
+
+    #[test]
+    fn rebase_removes_the_false_pnl_of_a_split() {
+        // 10 shares at 100 become 40 shares at 25: the same value.
+        let mut rebased = PnlAttributor::new(date(2026, 9, 28));
+        rebased.on_tick(&[stock_row("s", "AAA", 10.0, 100.0)], &intraday(0.0));
+        rebased.rebase(&[stock_row("s", "AAA", 40.0, 25.0)]);
+        rebased.on_tick(&[stock_row("s", "AAA", 40.0, 25.0)], &intraday(0.0));
+        let b = stock_buckets(&rebased, "s");
+        assert_abs_diff_eq!(b.actual, 0.0, epsilon = 1e-9);
+        assert_abs_diff_eq!(b.explained(), 0.0, epsilon = 1e-9);
+
+        // Without the rebase the same tick shows the false loss the rebase exists to prevent.
+        let mut naive = PnlAttributor::new(date(2026, 9, 28));
+        naive.on_tick(&[stock_row("s", "AAA", 10.0, 100.0)], &intraday(0.0));
+        naive.on_tick(&[stock_row("s", "AAA", 40.0, 25.0)], &intraday(0.0));
+        assert!(stock_buckets(&naive, "s").actual.abs() > 1.0);
+    }
+
+    #[test]
+    fn rebase_ignores_unknown_and_inactive_rows() {
+        let mut attributor = PnlAttributor::new(date(2026, 9, 28));
+        attributor.on_tick(&[stock_row("s", "AAA", 10.0, 100.0)], &intraday(0.0));
+        let mut errored = stock_row("s", "AAA", 40.0, 25.0);
+        errored.status = PositionStatus::Error {
+            reason: "x".to_owned(),
+        };
+        attributor.rebase(&[errored, stock_row("other", "AAA", 1.0, 1.0)]);
+        attributor.on_tick(&[stock_row("s", "AAA", 10.0, 100.0)], &intraday(0.0));
+        assert_abs_diff_eq!(stock_buckets(&attributor, "s").actual, 0.0, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn an_options_ex_date_drop_is_not_delta_pnl_under_the_escrowed_model() {
+        use chrono::NaiveDate;
+        use domain::{
+            CashDividend, Instrument, MarketState, OptionContract, Position, SpotAdjustment,
+            UnderlyingState,
+        };
+        use portfolio::PositionBook;
+
+        let ex_date = NaiveDate::from_ymd_opt(2026, 10, 15).unwrap();
+        let market = |as_of| {
+            MarketState::new(
+                as_of,
+                0.04,
+                [(sym("AAA"), UnderlyingState::new(100.0, 0.25, 0.0).unwrap())],
+            )
+            .unwrap()
+            .with_discrete_dividends([(
+                sym("AAA"),
+                vec![CashDividend {
+                    ex_date,
+                    amount: 2.0,
+                }],
+            )])
+            .unwrap()
+        };
+        let contract = OptionContract::new(
+            sym("AAA"),
+            OptionType::Call,
+            100.0,
+            NaiveDate::from_ymd_opt(2026, 12, 18).unwrap(),
+        )
+        .unwrap();
+        let book = PositionBook::from_positions([Position::new(
+            id("opt"),
+            Instrument::Option(contract),
+            10.0,
+            5.0,
+            None,
+        )
+        .unwrap()])
+        .unwrap();
+        let close = Utc.with_ymd_and_hms(2026, 10, 14, 20, 0, 0).unwrap();
+        let open = Utc.with_ymd_and_hms(2026, 10, 15, 13, 30, 0).unwrap();
+        let before = market(close);
+        let mut after = market(open);
+        after.take_due_dividends(&sym("AAA"), ex_date);
+        after
+            .adjust_spot(&sym("AAA"), SpotAdjustment::Subtract(2.0))
+            .unwrap();
+        let step = ClockStep {
+            from: close,
+            to: open,
+            trading_years: 0.0,
+            calendar_years: domain::year_fraction(close, open),
+            session_date: ex_date,
+            kind: StepKind::Overnight,
+        };
+
+        let residual_of = |note: bool| {
+            let mut attributor = PnlAttributor::new(date(2026, 10, 14));
+            attributor.on_tick(&book.value_all(&before, close), &intraday(0.0));
+            if note {
+                attributor.note_dividend(&sym("AAA"), 2.0, Vec::new());
+            }
+            attributor.on_tick(&book.value_all(&after, open), &step);
+            attributor.report().by_position[&id("opt")].today
+        };
+        let noted = residual_of(true);
+        let ignored = residual_of(false);
+        // Without the note the 2.00 spot drop is charged to delta and the residual is roughly
+        // delta × 2 × 1,000 (about 870). With it, only the gap from one step of discounting is left.
+        assert!(ignored.residual.abs() > 500.0, "{}", ignored.residual);
+        assert!(noted.residual.abs() < 30.0, "{}", noted.residual);
     }
 }
