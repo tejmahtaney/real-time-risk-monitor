@@ -11,6 +11,7 @@
 
 #![warn(missing_docs)]
 
+mod actions_source;
 mod archive;
 mod calibration;
 mod clock;
@@ -25,6 +26,9 @@ mod simulation_config;
 mod simulator;
 mod source;
 
+pub use actions_source::{
+    ActionsArchiveRecord, load_upcoming_dividends, parse_dividends_body, upcoming_dividend_actions,
+};
 pub use archive::{Archive, ArchiveHit, ArchiveRecord};
 pub use calibration::{EWMA_LAMBDA, TRADING_DAYS_PER_YEAR, calibrate};
 pub use clock::SystemClock;

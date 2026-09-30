@@ -164,6 +164,51 @@ impl AlphaVantageSource {
     }
 }
 
+impl AlphaVantageSource {
+    /// Fetches the raw body of the `DIVIDENDS` endpoint for `symbol`: historical and
+    /// declared future dividends. It shares the request spacing of the daily endpoint.
+    ///
+    /// # Errors
+    ///
+    /// The same errors as a daily download: [`MarketDataError::Transport`],
+    /// [`MarketDataError::HttpStatus`], and the limit and symbol errors of an Alpha Vantage
+    /// error body.
+    pub async fn dividends_body(&self, symbol: &Symbol) -> Result<String, MarketDataError> {
+        let mut last = self.last_request.lock().await;
+        if let Some(previous) = *last
+            && let Some(wait) = self.min_interval.checked_sub(previous.elapsed())
+        {
+            tokio::time::sleep(wait).await;
+        }
+        let result = self
+            .get_body(&[("function", "DIVIDENDS"), ("symbol", symbol.as_str())])
+            .await;
+        *last = Some(Instant::now());
+        result
+    }
+
+    /// One GET with the API key added. The key never appears in an error.
+    async fn get_body(&self, query: &[(&str, &str)]) -> Result<String, MarketDataError> {
+        let response = self
+            .client
+            .get(&self.base_url)
+            .query(query)
+            .query(&[("apikey", self.api_key.as_str())])
+            .send()
+            .await
+            // `without_url` matters: the URL carries the API key.
+            .map_err(|e| MarketDataError::Transport(e.without_url().to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(MarketDataError::HttpStatus(status.as_u16()));
+        }
+        response
+            .text()
+            .await
+            .map_err(|e| MarketDataError::Transport(e.without_url().to_string()))
+    }
+}
+
 impl HistorySource for AlphaVantageSource {
     async fn download(&self, symbol: &Symbol) -> Result<Download, MarketDataError> {
         // The guard is held for the whole request, so requests never overlap and the
@@ -189,6 +234,31 @@ const LIMIT_PHRASES: [&str; 5] = [
     "per day",
 ];
 
+/// The error an Alpha Vantage body stands for, if it is one. Alpha Vantage answers HTTP 200
+/// for failures too, with `Error Message`, `Note` or `Information` in place of data.
+pub(crate) fn error_body(
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Option<MarketDataError> {
+    let text = |key: &str| {
+        object
+            .get(key)
+            .map(|v| v.as_str().unwrap_or_default().to_owned())
+    };
+    if let Some(message) = text("Error Message") {
+        return Some(MarketDataError::InvalidSymbol(message));
+    }
+    if let Some(message) = text("Note") {
+        return Some(MarketDataError::RateLimited(message));
+    }
+    let message = text("Information")?;
+    let lower = message.to_ascii_lowercase();
+    Some(if LIMIT_PHRASES.iter().any(|p| lower.contains(p)) {
+        MarketDataError::RateLimited(message)
+    } else {
+        MarketDataError::Information(message)
+    })
+}
+
 /// Parses an Alpha Vantage `TIME_SERIES_DAILY` body into bars, oldest first.
 ///
 /// Alpha Vantage answers HTTP 200 for failures too, with one of these keys in place of
@@ -208,24 +278,8 @@ pub fn parse_daily_body(body: &str) -> Result<Vec<DailyBar>, MarketDataError> {
     let object = value
         .as_object()
         .ok_or_else(|| MarketDataError::BadBody("body is not a JSON object".into()))?;
-    let text = |key: &str| {
-        object
-            .get(key)
-            .map(|v| v.as_str().unwrap_or_default().to_owned())
-    };
-    if let Some(message) = text("Error Message") {
-        return Err(MarketDataError::InvalidSymbol(message));
-    }
-    if let Some(message) = text("Note") {
-        return Err(MarketDataError::RateLimited(message));
-    }
-    if let Some(message) = text("Information") {
-        let lower = message.to_ascii_lowercase();
-        return Err(if LIMIT_PHRASES.iter().any(|p| lower.contains(p)) {
-            MarketDataError::RateLimited(message)
-        } else {
-            MarketDataError::Information(message)
-        });
+    if let Some(error) = error_body(object) {
+        return Err(error);
     }
     let series = object
         .get(SERIES_KEY)
