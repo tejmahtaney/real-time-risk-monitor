@@ -4,7 +4,6 @@
 
 ## Open issues
 
-- Part 19: option multipliers are `f64` and honoured everywhere, but nothing adjusts strikes or multipliers for splits yet.
 - Part 19: the split detector (Part 7) only sees splits inside the 100-day fetched window and only matches ratios within 2 % of 1.5, 2, 3, 4, 5, 10, 20 or their inverses. A real one-day drop of about 33 % would be misread as a 3-for-2 split. It is logged as a warning, so it is visible.
 - Part 19: the simulator has one drift μ for every symbol, and the vol shocks of different symbols correlate through the price shocks (corr of W_i, W_j is ρ² times the price correlation). Neither is calibrated from data.
 - Part 19: exchange holidays are ignored by `SimClock`, so a simulated session runs on days the real market is shut.
@@ -13,6 +12,10 @@
 - Part 14: the generated TypeScript bindings render every Rust `u64` (`seq`, `compute_micros`, alert `id`, …) as `number` (`TS_RS_LARGE_INT=number` in `make types`, overriding ts-rs's `bigint` default), matching how `serde_json` actually encodes a `u64` on the wire. `number` loses precision above 2^53; in practice a tick `seq` or a `compute_micros` figure never gets remotely close to that, so this is a theoretical gap, not a real one, but it is worth knowing about if `seq` is ever repurposed as a long-lived global counter.
 - Part 16: the Greeks-over-time charts' warning band needs `config/limits.toml`'s `warning_threshold` (a single fraction applied to every limit), which `LimitStatus` does not carry on the wire. `frontend/src/lib/chartLimits.ts`'s `LIMIT_WARNING_THRESHOLD` duplicates the current value (`0.8`) as a documented constant instead. If `config/limits.toml`'s `warning_threshold` ever changes, this constant needs updating with it; a later part touching the backend could close this by adding the fraction to `LimitStatus` itself.
 - Part 16: `frontend/scripts/screenshot.ts` has been run twice (outside this sandbox, no browser available here — same limitation as Parts 14 and 15). The first round found five layout problems; a second round confirmed four of the five fixed but found the first attempt at the chart y-axis fix (item 4) still flattened the chart for a different reason, now corrected — see `docs/notes/part-16-charts.md`'s "Screenshot review fixes". The corrected chart fix has not itself been re-screenshotted to confirm, since the no-browser limitation still applies here.
+- Part 19: adjusted strikes are not rounded to a listed increment, as the OCC does (a 3-for-2 on a 240 strike gives 160 here, and 200 gives 133.33). The exact ratio is kept so value is invariant to 1e-9.
+- Part 19: the escrowed dividend model applies vol only to S*, which understates long-dated options on stocks with large dividends. The Haug-Haug-Lewis, Bos-Vandermark and Beneder-Vorst models fix it and are not built.
+- Part 19: on a restart the ledger is replayed into the seed's calibrated spot, so a replayed dividend is subtracted from the seed price and not from the price the simulated path had reached when it went ex. Ledger records go through the recorder's non-blocking channel and could be dropped if it were full (`dropped_records` would show it).
+- Part 19: Alpha Vantage `SPLITS` returns historical splits only, so real upcoming splits cannot be loaded. Only `DIVIDENDS` (which does return declared future dividends) has a loader, and it is off by default. The `SPLITS` JSON shape was not seen live: the one request made got the 1-request-per-second burst-limit reply.
 ## Log
 
 ### Part 01 - Workspace scaffold
@@ -256,3 +259,20 @@ TSLA      379.81    359.84    382.09    357.74   -5.26%   54.3% - 61.1%
 - Compute times (release build, `cargo run --release -p server`, the real sample portfolio and calibrated seed): `total_compute_micros` ranged roughly 530–810 µs across sampled ticks (delta-normal ~3–5 µs, delta-gamma MC ~215–360 µs including its one-off cache rebuild on the first tick, historical ~300–500 µs for its ~60-scenario window), comfortably under the 1 ms budget — `recompute_every_ticks` stayed at `1` (never throttled) for this book. See the notes file for the full breakdown.
 - Choices the prompt left open. (1) `VarCalculator` operates over exactly `summary.by_underlying.keys()` every tick; a symbol with no calibrated correlation/vol/returns entry (not possible with the fixed five-symbol calibration today, but the book is technically open to any symbol via `AddPosition`) degrades to "uncorrelated, unshocked" rather than erroring. (2) The Monte Carlo seed is a fixed constant independent of `config/simulation.toml`'s own RNG seed, so the scenario set never changes even if that seed does — common random numbers are about killing sampling noise across ticks, not about reproducing a particular session. (3) `VarReport`'s `total_compute_micros`/`compute_micros` fields include a one-off Monte Carlo cache rebuild when one happens; the *decision* of whether to throttle excludes rebuild time from its median, but the *reported* figure does not, since the reported figure is "how long this tick actually took," not "how long the throttle decision looked at." (4) Historical VaR's ES is computed with the same `interpolated_quantile`/`tail_mean_at_or_beyond` pair the delta-gamma MC path uses, for one shared, tested definition rather than two.
 - Open issues: none added — the prompt's own caveats about historical VaR (99 scenarios make the 99 % figure crude; no implied-vol history means it misses vega risk) are documented in code and in the notes file, not treated as bugs to fix.
+
+### Part 19 - Corporate actions and discrete dividends
+
+Built: stock splits that adjust positions without changing value, and discrete cash dividends priced with the escrowed model.
+
+- **domain:** `CorporateAction`, `AppliedAction`, `SpotAdjustment`, `CashDividend` and `escrow` (S* = S − ΣPV(D)), a dividend schedule on `MarketState`, `add_sessions`. `Position` gained `applied_actions` and `adjusted`.
+- **portfolio:** `PositionBook::apply_split` (OCC rule: forward whole-number splits scale contracts, others scale the multiplier; strikes not rounded) and `pay_dividend` (cash to realised P&L). One shared `option_greeks` for valuation, the resolve entry price and VaR, with q = 0 and the theta and rho corrections under the discrete model. `PositionSpec` and the CSV carry optional `multiplier`, `adjusted` and `applied_actions`. `adjust_specs_for_ledger` applies missing ledgered splits on every book load.
+- **marketdata:** `config/corporate_actions.toml` (`+Nd` or absolute dates, calendar, ledger replay into the seed), `dividend_model` in `market.toml`, `PriceFeed::adjust_spot`, an optional Alpha Vantage `DIVIDENDS` loader. Free tier: `DIVIDENDS` is available and returns declared future dividends, `SPLITS` is historical only.
+- **risk:** `dividends` bucket, `PnlAttributor::rebase` and `note_dividend`. Fixed Part 18 `compute_historical` to use the most recent 99 return dates.
+- **engine and server:** actions fire on the overnight step before valuation, the applied-actions ledger, `SessionEvent::CorporateAction`, `RiskSnapshot.corporate_actions`, restart and version-load rules.
+- **frontend:** dividends bucket in the P&L chart and headline, "adj" badge, corporate actions list in the alerts pane.
+
+New dependencies: none (`serde_json` added to `portfolio` dev-dependencies, already in the workspace).
+
+Tests: 539 Rust tests (unit, integration and doc tests) and 178 frontend tests, all passing.
+
+Open issues: see the four Part 19 entries added above (OCC strike rounding, the escrowed model's vol weakness, restart replay from the seed spot, `SPLITS` historical only). The three original Part 19 issues (split detector, single drift, holidays) stay open, out of scope.

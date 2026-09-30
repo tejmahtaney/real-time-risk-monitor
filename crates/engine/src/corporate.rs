@@ -308,13 +308,19 @@ impl<F: PriceFeed> Engine<F> {
         let _ = self.market.take_dividend_on(symbol, *ex_date);
 
         let payments: Vec<(PositionId, f64)> = self.book.pay_dividend(symbol, amount);
-        let cash: f64 = payments.iter().map(|(_, cash)| cash).sum();
+        // `+ 0.0` turns the -0.0 that summing nothing gives into a plain zero.
+        let cash = payments.iter().map(|(_, cash)| cash).sum::<f64>() + 0.0;
+        let summary = if payments.is_empty() {
+            "no stock positions to pay".to_owned()
+        } else {
+            format!("{cash:.2} cash paid to stock holders")
+        };
         self.attributor.note_dividend(symbol, amount, payments);
         Ok(Done {
             amount,
             positions_adjusted: 0,
             cash_paid: cash,
-            summary: format!("{cash:.2} cash paid to stock holders"),
+            summary,
         })
     }
 }
