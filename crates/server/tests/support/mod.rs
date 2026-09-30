@@ -96,6 +96,9 @@ pub fn positions() -> Vec<PositionSpec> {
         quantity: 10.0,
         entry_price: None,
         iv: None,
+        multiplier: None,
+        adjusted: None,
+        applied_actions: None,
     }]
 }
 

@@ -19,7 +19,9 @@ mod symbol;
 mod time;
 
 pub use clock::{Clock, FixedClock};
-pub use corporate_action::{CorporateAction, SpotAdjustment, is_whole_number_forward_split};
+pub use corporate_action::{
+    AppliedAction, CorporateAction, SpotAdjustment, is_whole_number_forward_split,
+};
 pub use dividend::{CashDividend, Escrow, escrow, ex_instant};
 pub use error::DomainError;
 pub use instrument::{DEFAULT_MULTIPLIER, Instrument, InstrumentKind, OptionContract};

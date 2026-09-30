@@ -1,6 +1,11 @@
 //! The CSV portfolio format: parsing rows into unresolved [`PositionSpec`]s.
 //!
-//! Columns are `id,underlying,kind,strike,expiry,quantity,entry_price,iv`.
+//! Columns are `id,underlying,kind,strike,expiry,quantity,entry_price,iv`, and three
+//! optional ones after them: `multiplier` (an option's contract multiplier, default 100),
+//! `adjusted` (`true` for an option whose terms a split changed) and `applied_actions`
+//! (split action ids already reflected in the row, separated by `;`). A file without the
+//! optional columns still loads. A saved version carries them, so an adjusted contract
+//! survives a reload.
 //! Lines starting with `#` are comments. A spec is *unresolved* because its
 //! strike and expiry may be relative (`ATM+5%`, `+30d`) and its entry price may
 //! be blank. [`crate::resolve`] turns specs into positions against a market.
@@ -13,10 +18,11 @@ use std::str::FromStr;
 
 use chrono::NaiveDate;
 use csv::{ReaderBuilder, StringRecord, Trim, WriterBuilder};
-use domain::{Instrument, InstrumentKind, Position, PositionId, Symbol};
+use domain::{DEFAULT_MULTIPLIER, Instrument, InstrumentKind, Position, PositionId, Symbol};
 use serde::{Deserialize, Serialize};
 
 use crate::error::PortfolioError;
+use crate::split::{AppliedSplit, Terms, split_terms};
 
 /// Longest relative expiry accepted, in days (about ten years).
 const MAX_RELATIVE_DAYS: u32 = 3650;
@@ -32,6 +38,15 @@ const COLUMNS: [&str; 8] = [
     "entry_price",
     "iv",
 ];
+
+/// The optional columns, in canonical order, written after [`COLUMNS`].
+const OPTIONAL_COLUMNS: [&str; 3] = ["multiplier", "adjusted", "applied_actions"];
+
+/// Where each column sits in the header.
+struct ColumnIndex {
+    required: [usize; COLUMNS.len()],
+    optional: [Option<usize>; OPTIONAL_COLUMNS.len()],
+}
 
 /// A strike as written in the file.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ts_rs::TS)]
@@ -188,6 +203,19 @@ pub struct PositionSpec {
     pub entry_price: Option<f64>,
     /// Volatility override as a decimal. `None` means use the underlying's.
     pub iv: Option<f64>,
+    /// An option's contract multiplier. `None` means the standard 100. Ignored for equity.
+    #[serde(default)]
+    #[ts(optional)]
+    pub multiplier: Option<f64>,
+    /// Whether a split changed this option's terms. Display only: it drives the "adj" badge.
+    #[serde(default)]
+    #[ts(optional)]
+    pub adjusted: Option<bool>,
+    /// Ids of the split actions already reflected in this row's terms, so a reload of the
+    /// book cannot apply them twice.
+    #[serde(default)]
+    #[ts(optional)]
+    pub applied_actions: Option<Vec<String>>,
 }
 
 /// Loads and parses a portfolio CSV file.
@@ -206,13 +234,16 @@ pub fn load_csv(path: &Path) -> Result<Vec<PositionSpec>, PortfolioError> {
 /// Builds a spec that round-trips a resolved position back to CSV exactly: strike as
 /// [`StrikeSpec::Absolute`], expiry as [`ExpirySpec::Date`], entry price and any IV
 /// override carried through explicitly rather than left blank, so a saved and reloaded
-/// version reproduces the same entry price and P&L basis.
+/// version reproduces the same entry price and P&L basis. An option's multiplier, its
+/// `adjusted` flag and the ids of the splits reflected in its terms are carried too, so a
+/// split-adjusted contract (a 3-for-2 option has multiplier 150) survives the round trip.
 pub fn to_spec(position: &Position) -> PositionSpec {
-    let (strike, expiry) = match &position.instrument {
-        Instrument::Equity { .. } => (None, None),
+    let (strike, expiry, multiplier) = match &position.instrument {
+        Instrument::Equity { .. } => (None, None, None),
         Instrument::Option(contract) => (
             Some(StrikeSpec::Absolute(contract.strike)),
             Some(ExpirySpec::Date(contract.expiry)),
+            Some(contract.multiplier),
         ),
     };
     PositionSpec {
@@ -224,7 +255,63 @@ pub fn to_spec(position: &Position) -> PositionSpec {
         quantity: position.quantity,
         entry_price: Some(position.entry_price),
         iv: position.iv_override,
+        multiplier,
+        adjusted: position.adjusted.then_some(true),
+        applied_actions: (!position.applied_actions.is_empty())
+            .then(|| position.applied_actions.clone()),
     }
+}
+
+/// Brings loaded specs up to date with the splits already in the ledger.
+///
+/// This runs whenever a book is loaded: a `last` start, a saved version at startup, or a
+/// version loaded mid-session. For each spec, every ledgered split on its underlying whose
+/// id is not in the spec's `applied_actions` is applied, in ledger order, and its id
+/// is added, so a version saved before a split comes back adjusted exactly once and one
+/// saved after it comes back unchanged. Dividends never appear here: they change only cash.
+///
+/// A spec written to be priced at load time is already in current terms and is only
+/// stamped, not adjusted: one with a blank `entry_price`, or an option with a relative
+/// (`ATM`) strike, because that strike resolves against the already-adjusted spot.
+pub fn adjust_specs_for_ledger(
+    mut specs: Vec<PositionSpec>,
+    splits: &[AppliedSplit],
+) -> Vec<PositionSpec> {
+    for spec in &mut specs {
+        for split in splits.iter().filter(|s| s.symbol == spec.underlying) {
+            let applied = spec.applied_actions.get_or_insert_with(Vec::new);
+            if applied.contains(&split.id) {
+                continue;
+            }
+            applied.push(split.id.clone());
+            let is_option = spec.kind != InstrumentKind::Equity;
+            let strike = match spec.strike {
+                Some(StrikeSpec::Absolute(strike)) => Some(strike),
+                _ => None,
+            };
+            let in_current_terms = spec.entry_price.is_none() || (is_option && strike.is_none());
+            let (Some(entry_price), false) = (spec.entry_price, in_current_terms) else {
+                continue;
+            };
+            let terms = split_terms(
+                Terms {
+                    quantity: spec.quantity,
+                    entry_price,
+                    strike,
+                    multiplier: spec.multiplier.unwrap_or(DEFAULT_MULTIPLIER),
+                },
+                split.ratio,
+            );
+            spec.quantity = terms.quantity;
+            spec.entry_price = Some(terms.entry_price);
+            if is_option {
+                spec.strike = terms.strike.map(StrikeSpec::Absolute);
+                spec.multiplier = Some(terms.multiplier);
+                spec.adjusted = Some(true);
+            }
+        }
+    }
+    specs
 }
 
 /// Writes `specs` as portfolio CSV, in [`COLUMNS`] order, using each field's [`Display`]
@@ -237,7 +324,8 @@ pub fn to_spec(position: &Position) -> PositionSpec {
 /// [`PortfolioError::Csv`] when the underlying writer fails.
 pub fn write_csv<W: Write>(writer: W, specs: &[PositionSpec]) -> Result<(), PortfolioError> {
     let mut wtr = WriterBuilder::new().from_writer(writer);
-    wtr.write_record(COLUMNS).map_err(|e| csv_write_error(&e))?;
+    wtr.write_record(COLUMNS.iter().chain(&OPTIONAL_COLUMNS))
+        .map_err(|e| csv_write_error(&e))?;
     for spec in specs {
         wtr.write_record([
             spec.id.as_str(),
@@ -248,6 +336,17 @@ pub fn write_csv<W: Write>(writer: W, specs: &[PositionSpec]) -> Result<(), Port
             &spec.quantity.to_string(),
             &spec.entry_price.map(|p| p.to_string()).unwrap_or_default(),
             &spec.iv.map(|v| v.to_string()).unwrap_or_default(),
+            &spec.multiplier.map(|m| m.to_string()).unwrap_or_default(),
+            if spec.adjusted == Some(true) {
+                "true"
+            } else {
+                ""
+            },
+            &spec
+                .applied_actions
+                .as_deref()
+                .unwrap_or_default()
+                .join(";"),
         ])
         .map_err(|e| csv_write_error(&e))?;
     }
@@ -288,7 +387,8 @@ fn csv_write_error(e: &csv::Error) -> PortfolioError {
 /// Parses portfolio CSV from any reader.
 ///
 /// The first non-comment line is the header. Columns may come in any order,
-/// but all eight must be present. Whitespace around fields is trimmed and
+/// but all eight required ones must be present. The optional `multiplier`, `adjusted`
+/// and `applied_actions` columns default to 100, false and none when absent. Whitespace around fields is trimmed and
 /// lines starting with `#` are skipped. `strike` and `expiry` are required for
 /// options and must be blank for equity. Blank `entry_price` and `iv` mean
 /// `None`.
@@ -305,8 +405,14 @@ pub fn parse_csv<R: Read>(reader: R) -> Result<Vec<PositionSpec>, PortfolioError
 
     let headers = rdr.headers().map_err(|e| row_error(&e))?.clone();
     let header_line = headers.position().map_or(1, csv::Position::line);
-    let mut index = [0_usize; COLUMNS.len()];
-    for (slot, name) in index.iter_mut().zip(COLUMNS) {
+    let mut index = ColumnIndex {
+        required: [0_usize; COLUMNS.len()],
+        optional: [None; OPTIONAL_COLUMNS.len()],
+    };
+    for (slot, name) in index.optional.iter_mut().zip(OPTIONAL_COLUMNS) {
+        *slot = headers.iter().position(|h| h.eq_ignore_ascii_case(name));
+    }
+    for (slot, name) in index.required.iter_mut().zip(COLUMNS) {
         *slot = headers
             .iter()
             .position(|h| h.eq_ignore_ascii_case(name))
@@ -341,14 +447,19 @@ fn row_error(e: &csv::Error) -> PortfolioError {
     }
 }
 
-fn parse_row(record: &StringRecord, index: &[usize; 8]) -> Result<PositionSpec, PortfolioError> {
+fn parse_row(record: &StringRecord, index: &ColumnIndex) -> Result<PositionSpec, PortfolioError> {
     let line = record.position().map_or(0, csv::Position::line);
     let err = |column: &str, message: String| PortfolioError::Csv {
         line,
         column: column.to_owned(),
         message,
     };
-    let cell = |i: usize| record.get(index[i]).unwrap_or("");
+    let cell = |i: usize| record.get(index.required[i]).unwrap_or("");
+    let optional_cell = |i: usize| {
+        index.optional[i]
+            .and_then(|column| record.get(column))
+            .unwrap_or("")
+    };
 
     let id = PositionId::new(cell(0)).map_err(|e| err("id", e.to_string()))?;
     let underlying = Symbol::new(cell(1)).map_err(|e| err("underlying", e.to_string()))?;
@@ -395,6 +506,29 @@ fn parse_row(record: &StringRecord, index: &[usize; 8]) -> Result<PositionSpec, 
         return Err(err("iv", "must be positive".to_owned()));
     }
 
+    let multiplier = parse_number(optional_cell(0)).map_err(|m| err("multiplier", m))?;
+    if multiplier.is_some_and(|m| m <= 0.0) {
+        return Err(err("multiplier", "must be positive".to_owned()));
+    }
+    let adjusted = match optional_cell(1).to_ascii_lowercase().as_str() {
+        "" | "false" => None,
+        "true" => Some(true),
+        other => {
+            return Err(err(
+                "adjusted",
+                format!("expected true or false, got {other:?}"),
+            ));
+        }
+    };
+    let applied_actions = optional_cell(2);
+    let applied_actions = (!applied_actions.is_empty()).then(|| {
+        applied_actions
+            .split(';')
+            .map(|id| id.trim().to_owned())
+            .filter(|id| !id.is_empty())
+            .collect::<Vec<_>>()
+    });
+
     Ok(PositionSpec {
         id,
         underlying,
@@ -404,6 +538,9 @@ fn parse_row(record: &StringRecord, index: &[usize; 8]) -> Result<PositionSpec, 
         quantity,
         entry_price,
         iv,
+        multiplier,
+        adjusted,
+        applied_actions,
     })
 }
 

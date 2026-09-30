@@ -33,6 +33,9 @@ async fn get_specs_then_load_restores_the_original_book_exactly() {
         quantity: 5.0,
         entry_price: None,
         iv: None,
+        multiplier: None,
+        adjusted: None,
+        applied_actions: None,
     };
     handle
         .send(EngineCommand::AddPosition(new_spec))

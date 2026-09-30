@@ -1466,6 +1466,7 @@ dependencies = [
  "domain",
  "pricing",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tracing",

@@ -3,11 +3,11 @@
 use chrono::{Datelike, Days, NaiveDate, Weekday};
 use domain::{
     Instrument, InstrumentKind, MarketState, OptionContract, OptionType, Position, UnderlyingState,
-    market_date, year_fraction,
+    market_date,
 };
-use pricing::BsInputs;
 
 use crate::error::PortfolioError;
+use crate::risk::option_greeks;
 use crate::spec::{ExpirySpec, PositionSpec, StrikeSpec};
 
 /// Rounds a raw strike to a listed strike.
@@ -141,48 +141,46 @@ fn resolve_one(
             } else {
                 OptionType::Put
             };
-            Instrument::Option(OptionContract::new(
-                spec.underlying.clone(),
-                option_type,
-                strike,
-                expiry,
-            )?)
+            let contract =
+                OptionContract::new(spec.underlying.clone(), option_type, strike, expiry)?;
+            Instrument::Option(match spec.multiplier {
+                Some(multiplier) => contract.with_multiplier(multiplier)?,
+                None => contract,
+            })
         }
     };
 
     let entry_price = match spec.entry_price {
         Some(p) => p,
-        None => theoretical_value(&instrument, state, market.rate(), spec.iv, start)?,
+        None => theoretical_value(&instrument, state, market, spec.iv, start)?,
     };
-    Ok(Position::new(
+    let mut position = Position::new(
         spec.id.clone(),
         instrument,
         spec.quantity,
         entry_price,
         spec.iv,
-    )?)
+    )?;
+    position.adjusted = spec.adjusted.unwrap_or(false);
+    position.applied_actions = spec.applied_actions.clone().unwrap_or_default();
+    Ok(position)
 }
 
-/// The per-unit theoretical value of an instrument at `at`.
+/// The per-unit theoretical value of an instrument at `at`, under the same dividend
+/// model as live valuation.
 fn theoretical_value(
     instrument: &Instrument,
     state: &UnderlyingState,
-    rate: f64,
+    market: &MarketState,
     iv_override: Option<f64>,
     at: chrono::DateTime<chrono::Utc>,
 ) -> Result<f64, PortfolioError> {
     match instrument {
         Instrument::Equity { .. } => Ok(state.spot()),
         Instrument::Option(c) => {
-            let inputs = BsInputs::new(
-                state.spot(),
-                c.strike,
-                year_fraction(at, c.expiry_datetime()),
-                rate,
-                state.dividend_yield(),
-                iv_override.unwrap_or_else(|| state.vol()),
-            )?;
-            Ok(pricing::price(c.option_type, &inputs))
+            let vol = iv_override.unwrap_or_else(|| state.vol());
+            let (raw, _) = option_greeks(market, state, c, vol, at)?;
+            Ok(raw.price)
         }
     }
 }
@@ -191,7 +189,8 @@ fn theoretical_value(
 mod tests {
     use approx::assert_relative_eq;
     use chrono::{DateTime, TimeZone, Utc};
-    use domain::{PositionId, Symbol};
+    use domain::{PositionId, Symbol, year_fraction};
+    use pricing::BsInputs;
 
     use super::*;
 
@@ -225,6 +224,9 @@ mod tests {
             quantity: 1.0,
             entry_price: None,
             iv: None,
+            multiplier: None,
+            adjusted: None,
+            applied_actions: None,
         }
     }
 

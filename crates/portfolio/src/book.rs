@@ -7,11 +7,14 @@ use domain::{Instrument, MarketState, Position, PositionId, Symbol};
 
 use crate::error::PortfolioError;
 use crate::risk::{PositionRisk, Settlement, SettlementEvent, intrinsic, value_position};
+use crate::split::{Terms, split_terms};
 
 #[derive(Debug, Clone)]
 struct BookEntry {
     position: Position,
     settlement: Option<Settlement>,
+    /// Cash dividends received since the book was built, booked to realised P&L.
+    dividend_income: f64,
 }
 
 /// Positions keyed by id, in insertion order.
@@ -57,6 +60,7 @@ impl PositionBook {
         self.entries.push(BookEntry {
             position,
             settlement: None,
+            dividend_income: 0.0,
         });
         Ok(())
     }
@@ -123,8 +127,76 @@ impl PositionBook {
     pub fn value_all(&self, market: &MarketState, now: DateTime<Utc>) -> Vec<PositionRisk> {
         self.entries
             .iter()
-            .map(|e| value_position(&e.position, e.settlement.as_ref(), market, now))
+            .map(|e| {
+                value_position(
+                    &e.position,
+                    e.settlement.as_ref(),
+                    e.dividend_income,
+                    market,
+                    now,
+                )
+            })
             .collect()
+    }
+
+    /// Applies a split of `ratio` to every live position on `symbol` and returns their ids.
+    ///
+    /// The rules are in the `split` module docs: stock quantity × ratio; an option's
+    /// strike ÷ ratio with either contracts × ratio (a whole-number forward split) or the
+    /// multiplier × ratio (anything else); entry price ÷ ratio. Every option touched gets
+    /// `adjusted = true`. `action_id` is added to each position's `applied_actions`, and a
+    /// position that already lists it is skipped, so applying the same action twice cannot
+    /// change a position twice. Settled positions are left alone. Order is kept.
+    /// All or nothing: when any adjusted position would be invalid, none changes.
+    ///
+    /// # Errors
+    ///
+    /// [`PortfolioError::Domain`] for a ratio that would produce an invalid strike or
+    /// multiplier.
+    pub fn apply_split(
+        &mut self,
+        symbol: &Symbol,
+        ratio: f64,
+        action_id: &str,
+    ) -> Result<Vec<PositionId>, PortfolioError> {
+        let mut staged = Vec::new();
+        for (index, entry) in self.entries.iter().enumerate() {
+            let position = &entry.position;
+            if entry.settlement.is_some()
+                || position.instrument.underlying() != symbol
+                || position.applied_actions.iter().any(|id| id == action_id)
+            {
+                continue;
+            }
+            staged.push((index, adjusted_for_split(position, ratio, action_id)?));
+        }
+        let mut ids = Vec::with_capacity(staged.len());
+        for (index, position) in staged {
+            ids.push(position.id.clone());
+            self.entries[index].position = position;
+        }
+        Ok(ids)
+    }
+
+    /// Pays a cash dividend of `amount` per share to every stock position on `symbol` and
+    /// returns `(id, cash)` for each. Cash is quantity × amount, so a short position pays.
+    /// It is booked to that position's realised P&L. Options receive nothing: the dividend
+    /// reaches them through the price of the underlying.
+    pub fn pay_dividend(&mut self, symbol: &Symbol, amount: f64) -> Vec<(PositionId, f64)> {
+        let mut paid = Vec::new();
+        for entry in &mut self.entries {
+            let position = &entry.position;
+            let is_stock_on_symbol = matches!(
+                &position.instrument,
+                Instrument::Equity { symbol: held } if held == symbol
+            );
+            if is_stock_on_symbol {
+                let cash = position.quantity * amount;
+                entry.dividend_income += cash;
+                paid.push((position.id.clone(), cash));
+            }
+        }
+        paid
     }
 
     /// Settles every option at or past its expiry time and returns what happened.
@@ -207,6 +279,53 @@ impl PositionBook {
         }
         events
     }
+}
+
+/// A copy of `position` with a split of `ratio` applied and `action_id` recorded.
+fn adjusted_for_split(
+    position: &Position,
+    ratio: f64,
+    action_id: &str,
+) -> Result<Position, PortfolioError> {
+    let mut next = position.clone();
+    match &mut next.instrument {
+        Instrument::Equity { .. } => {
+            let terms = split_terms(
+                Terms {
+                    quantity: position.quantity,
+                    entry_price: position.entry_price,
+                    strike: None,
+                    multiplier: 1.0,
+                },
+                ratio,
+            );
+            next.quantity = terms.quantity;
+            next.entry_price = terms.entry_price;
+        }
+        Instrument::Option(contract) => {
+            let terms = split_terms(
+                Terms {
+                    quantity: position.quantity,
+                    entry_price: position.entry_price,
+                    strike: Some(contract.strike),
+                    multiplier: contract.multiplier,
+                },
+                ratio,
+            );
+            *contract = domain::OptionContract::new(
+                contract.underlying.clone(),
+                contract.option_type,
+                terms.strike.unwrap_or(contract.strike),
+                contract.expiry,
+            )?
+            .with_multiplier(terms.multiplier)?;
+            next.quantity = terms.quantity;
+            next.entry_price = terms.entry_price;
+            next.adjusted = true;
+        }
+    }
+    next.applied_actions.push(action_id.to_owned());
+    Ok(next)
 }
 
 #[cfg(test)]

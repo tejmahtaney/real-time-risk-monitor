@@ -163,6 +163,9 @@ async fn restart_with_last_restores_the_book_from_current_json() {
             quantity: 5.0,
             entry_price: None,
             iv: None,
+            multiplier: None,
+            adjusted: None,
+            applied_actions: None,
         }))
         .await
         .unwrap()

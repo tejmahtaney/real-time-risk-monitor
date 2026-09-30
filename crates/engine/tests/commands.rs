@@ -85,6 +85,9 @@ async fn add_and_remove_positions() {
         quantity: 5.0,
         entry_price: None,
         iv: None,
+        multiplier: None,
+        adjusted: None,
+        applied_actions: None,
     };
 
     let reply = handle

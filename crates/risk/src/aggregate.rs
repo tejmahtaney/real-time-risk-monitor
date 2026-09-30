@@ -186,6 +186,7 @@ mod tests {
             entry_price: entry,
             unrealised_pnl: (greeks.price - entry) * size,
             realised_pnl: 0.0,
+            adjusted: false,
             greeks,
             reporting: ReportingGreeks::scale(&greeks, quantity, multiplier, spot),
             status: PositionStatus::Active,

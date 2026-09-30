@@ -2,11 +2,13 @@
 
 use chrono::{DateTime, Utc};
 use domain::{
-    Instrument, InstrumentKind, MarketState, OptionType, Position, PositionId, Symbol,
-    year_fraction,
+    Instrument, InstrumentKind, MarketState, OptionContract, OptionType, Position, PositionId,
+    Symbol, UnderlyingState, escrow, year_fraction,
 };
 use pricing::{BsInputs, Greeks};
 use serde::{Deserialize, Serialize};
+
+use crate::error::PortfolioError;
 
 /// A position's Greeks in reporting units.
 ///
@@ -119,8 +121,11 @@ pub struct PositionRisk {
     pub entry_price: f64,
     /// (mark − entry) × quantity × multiplier. Zero once settled.
     pub unrealised_pnl: f64,
-    /// (intrinsic − entry) × quantity × multiplier once settled, otherwise zero.
+    /// (intrinsic − entry) × quantity × multiplier once settled. For a live stock position,
+    /// the cash dividends received so far, otherwise zero.
     pub realised_pnl: f64,
+    /// Whether a split changed this option's contract terms. Drives the "adj" badge.
+    pub adjusted: bool,
     /// Raw per-unit Greeks from `pricing`. Equity has delta 1 and the rest zero.
     pub greeks: Greeks,
     /// Whole-position Greeks in reporting units.
@@ -174,14 +179,19 @@ pub struct SettlementEvent {
 }
 
 /// Values one position, turning any failure into an `Error` row.
+///
+/// `dividend_income` is the cash dividends the position has received. It is booked to
+/// realised P&L, so a stock holder's unrealised plus realised P&L stays continuous when
+/// the price drops by the dividend on the ex-date.
 pub(crate) fn value_position(
     position: &Position,
     settlement: Option<&Settlement>,
+    dividend_income: f64,
     market: &MarketState,
     now: DateTime<Utc>,
 ) -> PositionRisk {
     let mut row = base_row(position);
-    match fill_row(&mut row, position, settlement, market, now) {
+    match fill_row(&mut row, position, settlement, dividend_income, market, now) {
         Ok(()) => row,
         Err(reason) => {
             let mut error_row = base_row(position);
@@ -208,6 +218,7 @@ fn base_row(position: &Position) -> PositionRisk {
         entry_price: position.entry_price,
         unrealised_pnl: 0.0,
         realised_pnl: 0.0,
+        adjusted: position.adjusted,
         greeks: zero_greeks(0.0),
         reporting: ReportingGreeks::default(),
         status: PositionStatus::Active,
@@ -232,6 +243,7 @@ fn fill_row(
     row: &mut PositionRisk,
     position: &Position,
     settlement: Option<&Settlement>,
+    dividend_income: f64,
     market: &MarketState,
     now: DateTime<Utc>,
 ) -> Result<(), String> {
@@ -268,21 +280,9 @@ fn fill_row(
                 return Err(format!("expired at {expiry} and not settled"));
             }
             let vol = position.iv_override.unwrap_or_else(|| state.vol());
-            let time_to_expiry = year_fraction(now, expiry);
-            let inputs = BsInputs::new(
-                state.spot(),
-                contract.strike,
-                time_to_expiry,
-                market.rate(),
-                state.dividend_yield(),
-                vol,
-            )
-            .map_err(|e| e.to_string())?;
-            (
-                pricing::greeks(contract.option_type, &inputs),
-                vol,
-                time_to_expiry,
-            )
+            let (raw, time_to_expiry) =
+                option_greeks(market, state, contract, vol, now).map_err(|e| e.to_string())?;
+            (raw, vol, time_to_expiry)
         }
     };
 
@@ -299,9 +299,71 @@ fn fill_row(
     row.mark = raw.price;
     row.market_value = market_value;
     row.unrealised_pnl = unrealised_pnl;
+    row.realised_pnl = dividend_income;
     row.greeks = raw;
     row.reporting = reporting;
     Ok(())
+}
+
+/// Raw per-unit price and Greeks of an option, and its time to expiry, under whichever
+/// dividend model the underlying is on. Every valuation path goes through this: position
+/// valuation, the theoretical entry price at load and, through `value_all`, `VaR` repricing.
+///
+/// - **Yield model** (the default): plain Black-Scholes-Merton with the continuous yield q.
+/// - **Discrete model**: the escrowed dividend model. With S* = S − Σ PV(Dᵢ) over dividends
+///   with an ex-date after `now` and on or before expiry, the option is priced with spot S*
+///   and q = 0. The stored yield is ignored, so the dividend is never counted twice.
+///
+/// Sensitivities under the escrowed model. S* differs from S by a quantity that does not
+/// depend on S, so ∂S*/∂S = 1 and delta, gamma, vanna and every other sensitivity to the
+/// spot *level* with respect to S equal those with respect to S*. Vega and volga are with
+/// respect to the vol applied to S*. Theta and rho differ, because S* itself moves:
+///
+/// - Time: PV(D) accretes at r as time passes, so dS*/dt = −r · PV(D) and
+///   `θ = θ_BS(S*) − Δ · r · PV(D)`.
+/// - Rate: dPV(Dᵢ)/dr = −τᵢ · PV(Dᵢ), so dS*/dr = +Σ τᵢ · PV(Dᵢ) and
+///   `ρ = ρ_BS(S*) + Δ · Σ τᵢ · PV(Dᵢ)`, where τᵢ is the time to each ex-date.
+///
+/// # Errors
+///
+/// [`PortfolioError::Domain`] with `EscrowedSpotNonPositive` when S* is not positive, and
+/// the pricing errors for bad inputs.
+pub(crate) fn option_greeks(
+    market: &MarketState,
+    state: &UnderlyingState,
+    contract: &OptionContract,
+    vol: f64,
+    now: DateTime<Utc>,
+) -> Result<(Greeks, f64), PortfolioError> {
+    let expiry = contract.expiry_datetime();
+    let time_to_expiry = year_fraction(now, expiry);
+    let Some(schedule) = market.dividends(&contract.underlying) else {
+        let inputs = BsInputs::new(
+            state.spot(),
+            contract.strike,
+            time_to_expiry,
+            market.rate(),
+            state.dividend_yield(),
+            vol,
+        )?;
+        return Ok((
+            pricing::greeks(contract.option_type, &inputs),
+            time_to_expiry,
+        ));
+    };
+    let escrowed = escrow(state.spot(), schedule, market.rate(), now, expiry)?;
+    let inputs = BsInputs::new(
+        escrowed.spot_star,
+        contract.strike,
+        time_to_expiry,
+        market.rate(),
+        0.0,
+        vol,
+    )?;
+    let mut raw = pricing::greeks(contract.option_type, &inputs);
+    raw.theta -= raw.delta * market.rate() * escrowed.pv;
+    raw.rho += raw.delta * escrowed.tau_pv;
+    Ok((raw, time_to_expiry))
 }
 
 /// Intrinsic value per unit at `spot`: max(ω × (S − K), 0).

@@ -101,6 +101,22 @@ impl CorporateAction {
     }
 }
 
+/// An action that has been applied, as recorded in the persisted ledger.
+///
+/// `amount` is the split ratio or the cash dividend per share that was actually applied,
+/// which for a dividend can differ from the configured amount if a split divided it first.
+/// The ledger is what lets a restart, a version load or a reload of the book know which
+/// splits the market and the book already reflect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+pub struct AppliedAction {
+    /// The action's id, unique in the calendar.
+    pub id: String,
+    /// The action, with its date resolved.
+    pub action: CorporateAction,
+    /// The ratio (split) or cash per share (dividend) that was applied.
+    pub amount: f64,
+}
+
 /// `4-for-1`, `3-for-2`, `1-for-10`, or the bare ratio when no small fraction fits.
 fn ratio_words(ratio: f64) -> String {
     if ratio >= 1.0 {
