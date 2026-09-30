@@ -44,7 +44,9 @@ const MAX_SPEED: f64 = 3600.0;
 
 /// Owns the position book, price feed, clock, market state, P&L attributor and limit
 /// monitor. Generic over the feed so tests can plug in a fake that fails on command;
-/// production code instantiates `Engine<marketdata::GbmSimulator>` exactly once.
+/// production code instantiates `Engine<marketdata::GbmSimulator>` once for the live app. The
+/// backtester builds `Engine<marketdata::ReplayFeed, domain::ReplayClock>`: the clock is a type
+/// parameter too, so a replay runs exactly this tick code.
 pub struct Engine<F: PriceFeed, C: EngineClock = SimClock> {
     clock: C,
     pub(crate) feed: F,
