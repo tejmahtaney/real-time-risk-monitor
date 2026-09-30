@@ -30,7 +30,7 @@ engine = { path = "crates/engine" }
 # Shared external crates.
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 tracing = "0.1"

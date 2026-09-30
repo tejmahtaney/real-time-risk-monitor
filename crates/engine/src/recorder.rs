@@ -212,6 +212,9 @@ pub(crate) enum RecorderRecord {
     /// One applied corporate action, appended to the ledger `portfolios/applied-actions.jsonl`.
     /// The ledger is what a restart reads to know which splits the book already reflects.
     AppliedAction(AppliedAction),
+    /// An expired option was replaced. Only a backtest rolls; a live session never produces this,
+    /// and the session recorder ignores it.
+    Roll(crate::backtest::BacktestRollEvent),
 }
 
 /// Runs until `records` closes (every `Sender` dropped, which the tick loop does once
@@ -331,6 +334,7 @@ fn apply_record(
             }
             Err(err) => tracing::error!(error = %err, "cannot reach portfolios/"),
         },
+        RecorderRecord::Roll(_) => {}
     }
 }
 
@@ -397,13 +401,27 @@ pub fn copy_session_config(
     session_id: &str,
     paths: &[&Path],
 ) -> Result<(), storage::StorageError> {
-    let dir = storage.subdir(&["sessions", session_id, "config"])?;
+    copy_config_files(storage, &["sessions", session_id, "config"], paths)
+}
+
+/// Copies each of `paths` into the folder `folder` (parts under the storage root), creating it.
+/// Shared by sessions and backtest runs. Missing source files are skipped with a warning.
+///
+/// # Errors
+///
+/// [`storage::StorageError`] when the folder itself cannot be created.
+pub(crate) fn copy_config_files(
+    storage: &StorageRoot,
+    folder: &[&str],
+    paths: &[&Path],
+) -> Result<(), storage::StorageError> {
+    let dir = storage.subdir(folder)?;
     for path in paths {
         let Some(name) = path.file_name() else {
             continue;
         };
         if let Err(err) = std::fs::copy(path, dir.join(name)) {
-            tracing::warn!(path = %path.display(), error = %err, "could not copy a config file into the session folder");
+            tracing::warn!(path = %path.display(), error = %err, "could not copy a config file into the run's folder");
         }
     }
     Ok(())

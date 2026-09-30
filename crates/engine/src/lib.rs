@@ -3,6 +3,7 @@
 
 #![warn(missing_docs)]
 
+mod backtest;
 mod command;
 mod corporate;
 mod engine;
@@ -11,6 +12,13 @@ mod handle;
 mod recorder;
 mod snapshot;
 
+pub use backtest::{
+    BACKTESTS_FOLDER, BacktestConfig, BacktestError, BacktestEvent, BacktestListItem,
+    BacktestManager, BacktestResults, BacktestRollEvent, BacktestRunState, BacktestSettings,
+    BacktestSource, BacktestSplitHandling, BacktestSplitNote, BacktestStatus, BacktestSubscription,
+    ClientGuard, ControlCommand, CreateOptions, DAILY_FILE, DEFAULT_SPEED, EVENTS_FILE, INPUT_FILE,
+    MAX_SPEED, MIN_SPEED, RollPolicy, RunInput, SETTINGS_FILE, SUMMARY_FILE, SpecRoller,
+};
 pub use command::{EngineCommand, EngineCommandError, EngineReply, EngineRequest};
 pub use corporate::{
     CorporateActionEvent, CorporateActionOutcome, CorporateActionState, archive_ledger, read_ledger,
@@ -43,10 +51,10 @@ pub use portfolio::{
     to_spec,
 };
 pub use risk::{
-    AlertEvent, Concentration, LimitKind, LimitState, LimitStatus, LimitsConfig, LimitsConfigError,
-    PnlBuckets, PnlLevel, PnlReport, PortfolioLimits, PortfolioTotals, RiskConfig, RiskConfigError,
-    RiskSummary, Scope, UnderlyingDeltaLimit, UnderlyingRisk, VarCalculator, VarMethod,
-    VarMethodReport, VarReport,
+    AlertEvent, BacktestSummary, Concentration, DailyRow, DayPnl, Drawdown, KupiecTest, LimitKind,
+    LimitState, LimitStatus, LimitsConfig, LimitsConfigError, PnlBuckets, PnlLevel, PnlReport,
+    PortfolioLimits, PortfolioTotals, RiskConfig, RiskConfigError, RiskSummary, Scope,
+    UnderlyingDeltaLimit, UnderlyingRisk, VarCalculator, VarMethod, VarMethodReport, VarReport,
 };
 pub use storage::{
     StorageError, StorageRoot, append_jsonl, check_part, list, list_dirs, read_json, read_jsonl,

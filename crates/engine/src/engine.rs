@@ -8,15 +8,15 @@ use std::time::{Duration, Instant};
 
 use std::sync::atomic::AtomicU64;
 
-use chrono::Utc;
+use chrono::{NaiveDate, Utc};
 use domain::{
     AppliedAction, Clock, ClockStep, EngineClock, MarketState, Position, SimClock, StepKind,
     Symbol, market_date,
 };
 use marketdata::{CorporateActionCalendar, PriceFeed, SeedData};
 use portfolio::{
-    PortfolioError, PositionBook, PositionSpec, adjust_specs_for_ledger, ledger_splits, resolve,
-    to_spec,
+    PortfolioError, PositionBook, PositionSpec, SettlementEvent, adjust_specs_for_ledger,
+    ledger_splits, resolve, to_spec,
 };
 use risk::{
     AlertEvent, LimitMonitor, LimitStatus, LimitsConfig, PnlAttributor, VarCalculator, VarMethod,
@@ -27,6 +27,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{Instant as TokioInstant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 
+use crate::backtest::{BacktestRollEvent, RollPolicy};
 use crate::command::{EngineCommand, EngineCommandError, EngineReply, EngineRequest};
 use crate::corporate::{CorporateActionEvent, CorporateActionState, missing_splits};
 use crate::error::EngineError;
@@ -61,7 +62,7 @@ pub struct Engine<F: PriceFeed, C: EngineClock = SimClock> {
     last_snapshot: Arc<RiskSnapshot>,
     /// Alert events from the most recent call to `tick`, drained by `spawn`'s loop onto
     /// the broadcast channel.
-    new_alerts: Vec<AlertEvent>,
+    pub(crate) new_alerts: Vec<AlertEvent>,
     /// Bounded ring buffer of per-tick history points, oldest first, for charting.
     history: VecDeque<HistoryPoint>,
     /// Maximum number of points [`Self::history`] is allowed to hold.
@@ -80,6 +81,11 @@ pub struct Engine<F: PriceFeed, C: EngineClock = SimClock> {
     pub(crate) ledger: Vec<AppliedAction>,
     /// The most recent corporate-action events, carried on every snapshot.
     pub(crate) corporate_events: VecDeque<CorporateActionEvent>,
+    /// What to do with an option that has just settled. `None` in live mode; the backtester sets
+    /// one to keep the book alive through a replay.
+    roll_policy: Option<Box<dyn RollPolicy>>,
+    /// Positions already past their expiry when the engine was built, settled before tick 0.
+    initial_settlements: Vec<SettlementEvent>,
 }
 
 impl<F: PriceFeed, C: EngineClock> Engine<F, C> {
@@ -179,7 +185,8 @@ impl<F: PriceFeed, C: EngineClock> Engine<F, C> {
         // off overnight) never shows a stale, unsettled error row on tick 0. The
         // recorder task does not exist yet at this point, so these settlements are
         // logged but not written to events.jsonl — an accepted, documented edge case.
-        for event in book.settle_expired(start, &market) {
+        let initial_settlements = book.settle_expired(start, &market);
+        for event in &initial_settlements {
             tracing::info!(id = %event.position_id, "settled an already-expired position at session start");
         }
 
@@ -280,7 +287,94 @@ impl<F: PriceFeed, C: EngineClock> Engine<F, C> {
             calendar: actions.calendar,
             ledger: actions.ledger,
             corporate_events: VecDeque::new(),
+            roll_policy: None,
+            initial_settlements,
         })
+    }
+
+    /// Sets what happens to an option that settles: the policy may name a replacement, which is
+    /// resolved against the market at that moment and added to the book before the tick's
+    /// valuation. Used by the backtester; live mode has none.
+    #[must_use]
+    pub fn with_roll_policy(mut self, policy: Box<dyn RollPolicy>) -> Self {
+        self.roll_policy = Some(policy);
+        self
+    }
+
+    /// Replaces the `VaR` calculator's correlation and historical return window. The backtester
+    /// calls this before each tick with data up to that tick's date.
+    pub(crate) fn set_var_window(
+        &mut self,
+        correlation: Vec<Vec<f64>>,
+        returns: Vec<Vec<f64>>,
+        return_dates: Vec<NaiveDate>,
+    ) {
+        self.var_calculator
+            .set_window(correlation, returns, return_dates);
+    }
+
+    /// Makes `VaR` compute on every tick, never throttled. See [`VarCalculator::compute_every_tick`].
+    pub(crate) fn compute_var_every_tick(&mut self) {
+        self.var_calculator.compute_every_tick();
+    }
+
+    /// The clock.
+    pub(crate) fn clock(&self) -> &C {
+        &self.clock
+    }
+
+    /// The clock, mutably.
+    pub(crate) fn clock_mut(&mut self) -> &mut C {
+        &mut self.clock
+    }
+
+    /// The most recently published snapshot.
+    pub(crate) fn latest_snapshot(&self) -> Arc<RiskSnapshot> {
+        self.last_snapshot.clone()
+    }
+
+    /// The options that were already expired when the engine was built and settled before tick 0.
+    pub(crate) fn initial_settlements(&self) -> &[SettlementEvent] {
+        &self.initial_settlements
+    }
+
+    /// Asks the roll policy for a replacement for each settled option and adds it, recording a
+    /// [`BacktestRollEvent`]. Does nothing without a policy. A replacement that cannot be added is
+    /// logged and skipped.
+    ///
+    /// Called inside a tick, before that tick's valuation. A position rolled at the close of date
+    /// d is therefore in the valuation, risk and `VaR` computed at that close. That `VaR` is the
+    /// start-of-day figure for d + 1, so the new option first appears in the `VaR` used for d + 1;
+    /// the `VaR` used for d was computed a day earlier and does not hold it. The attributor sees the
+    /// new position for the first time on this tick, so it contributes P&L from d + 1.
+    fn roll_settled(&mut self, settlements: &[SettlementEvent], date: NaiveDate) {
+        let Some(mut policy) = self.roll_policy.take() else {
+            return;
+        };
+        for settled in settlements {
+            let Some(spec) = policy.replacement(settled, date) else {
+                continue;
+            };
+            let opened = spec.id.clone();
+            match self.add_position(&spec) {
+                Ok(EngineReply::Added(row)) => {
+                    tracing::info!(settled = %settled.position_id, opened = %opened, "rolled an expired option");
+                    self.pending_records
+                        .push(RecorderRecord::Roll(BacktestRollEvent {
+                            sim_time: self.clock.now(),
+                            session_date: date,
+                            settled: settled.position_id.clone(),
+                            opened,
+                            description: row.description.clone(),
+                        }));
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(settled = %settled.position_id, %error, "could not roll an expired option");
+                }
+            }
+        }
+        self.roll_policy = Some(policy);
     }
 
     /// This session's id: a UTC start time plus a short random suffix.
@@ -369,6 +463,11 @@ impl<F: PriceFeed, C: EngineClock> Engine<F, C> {
                         event.clone(),
                     )));
             }
+            // Rolled before valuation, so the new option is in this tick's valuation, risk and VaR.
+            // That VaR is computed at this close and is the start-of-day figure for the *next* date:
+            // an option rolled at the close of d first appears in the VaR used for d + 1. The VaR
+            // used for d itself was computed a day earlier and never held the new option.
+            self.roll_settled(&settlements, step.session_date);
             self.pending_records
                 .push(RecorderRecord::CurrentPortfolio(self.active_positions()));
         }

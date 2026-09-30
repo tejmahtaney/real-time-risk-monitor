@@ -273,7 +273,8 @@ impl<F: PriceFeed, C: EngineClock> Engine<F, C> {
         })
     }
 
-    /// Drops the spot by the dividend, pays stock holders and tells the attributor.
+    /// Drops the spot by the dividend (unless the feed's prices already include it), pays stock
+    /// holders and tells the attributor.
     fn apply_dividend(&mut self, scheduled: &ScheduledAction) -> Result<Done, String> {
         let CorporateAction::CashDividend {
             symbol, ex_date, ..
@@ -297,14 +298,19 @@ impl<F: PriceFeed, C: EngineClock> Engine<F, C> {
             .ok_or_else(|| format!("no market data for {symbol}"))?;
         drop.apply(spot).map_err(|e| e.to_string())?;
 
-        self.feed
-            .adjust_spot(symbol, drop)
-            .map_err(|e| e.to_string())?;
-        if let Err(error) = self.market.adjust_spot(symbol, drop) {
-            let _ = self
-                .feed
-                .adjust_spot(symbol, SpotAdjustment::Subtract(-amount));
-            return Err(error.to_string());
+        // A simulated feed knows nothing about the dividend, so the engine lowers the spot. A feed
+        // of real closes (a replay) already fell on the ex-date: lowering it again would count the
+        // dividend twice. The cash, the schedule and the attribution below are the same either way.
+        if !self.feed.prices_include_dividends() {
+            self.feed
+                .adjust_spot(symbol, drop)
+                .map_err(|e| e.to_string())?;
+            if let Err(error) = self.market.adjust_spot(symbol, drop) {
+                let _ = self
+                    .feed
+                    .adjust_spot(symbol, SpotAdjustment::Subtract(-amount));
+                return Err(error.to_string());
+            }
         }
         let _ = self.market.take_dividend_on(symbol, *ex_date);
 
