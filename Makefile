@@ -1,4 +1,5 @@
-.PHONY: fmt lint test check run snapshot history storage-usage types frontend-install frontend-dev dev
+.PHONY: fmt lint test check run snapshot history storage-usage types frontend-install \
+	frontend-dev dev ci types-check frontend-ci docker-build docker-up docker-down hooks
 
 fmt:
 	cargo fmt --all
@@ -56,3 +57,41 @@ history:
 # Prints disk usage by top-level storage folder (market-data, portfolios, sessions, ...).
 storage-usage:
 	@cargo run --quiet --example storage_usage -p storage
+
+# Everything a CI server would run for this project, in the order a change is most
+# likely to fail: fast Rust checks first, then the frontend, then the (slowest)
+# Docker build last, so a real bug is reported well before the costly Docker build
+# even starts.
+ci: check types-check frontend-ci docker-build
+
+# Fails if `make types` regenerates bindings that differ from what is committed, so a
+# Rust API change without a matching `make types` run is caught before it reaches the
+# frontend as a silent drift instead of a type error.
+types-check:
+	$(MAKE) types
+	git diff --exit-code frontend/src/api/generated
+
+frontend-ci:
+	npm --prefix frontend run lint
+	npm --prefix frontend run typecheck
+	npm --prefix frontend test -- --run
+	npm --prefix frontend run build
+
+# APP_UID/APP_GID default to the current host user, so files risk-monitor writes into
+# the bind-mounted ../storage belong to me, not root (bash's own UID/GID are readonly
+# shell variables, hence the APP_ prefix here and in docker-compose.yml). GIT_COMMIT is
+# compiled into the image (see the Dockerfile) since `.git` is not in the build context.
+docker-build:
+	GIT_COMMIT="$$(git rev-parse HEAD)" APP_UID="$$(id -u)" APP_GID="$$(id -g)" docker compose build
+
+docker-up:
+	GIT_COMMIT="$$(git rev-parse HEAD)" APP_UID="$$(id -u)" APP_GID="$$(id -g)" docker compose up --build
+
+docker-down:
+	docker compose down
+
+# Not run automatically — installs scripts/pre-commit (the fast fmt/clippy checks
+# only) into this clone's own .git/hooks/, which nothing else here does on its own.
+hooks:
+	install -m 755 scripts/pre-commit .git/hooks/pre-commit
+	@echo "Installed scripts/pre-commit -> .git/hooks/pre-commit"

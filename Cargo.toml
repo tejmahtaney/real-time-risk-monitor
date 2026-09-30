@@ -44,7 +44,7 @@ rand_chacha = "0.10"
 rand_distr = { version = "0.6", default-features = false }
 axum = { version = "0.8", features = ["ws"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "cors", "timeout", "limit"] }
+tower-http = { version = "0.6", features = ["trace", "cors", "timeout", "limit", "fs"] }
 figment = { version = "0.10", features = ["toml", "env"] }
 tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
 anyhow = "1"

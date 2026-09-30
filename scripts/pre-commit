@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+# Fast checks only: the fmt check and clippy. `make ci` runs the full suite (tests,
+# frontend, Docker build); this hook stays quick enough to run on every commit.
+# Installed with `make hooks` (not automatic — that copies this file into
+# .git/hooks/pre-commit).
+set -eu
+
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings

@@ -2,9 +2,11 @@
 
 use std::time::Duration;
 
-use axum::extract::{Path, Query, State};
-use axum::http::{Method, StatusCode};
-use axum::routing::{delete, get, post};
+use axum::extract::{Path, Query, Request, State};
+use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
+use axum::middleware::{self, Next};
+use axum::response::Response;
+use axum::routing::{any, delete, get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use engine::{
@@ -12,8 +14,10 @@ use engine::{
     PortfolioTotals, PositionId, PositionRisk, PositionSpec, UnderlyingRisk,
 };
 use serde::{Deserialize, Serialize};
+use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
@@ -39,6 +43,12 @@ pub fn router(state: AppState) -> Router {
         .allow_methods([Method::GET, Method::POST, Method::DELETE])
         .allow_headers(Any);
 
+    let static_dir = state.config.static_dir.clone();
+    let index = static_dir.join("index.html");
+    let static_service = ServiceBuilder::new()
+        .layer(middleware::from_fn(static_cache_headers))
+        .service(ServeDir::new(static_dir).fallback(ServeFile::new(index)));
+
     Router::new()
         .route("/api/health", get(health))
         .route("/api/positions", get(list_positions).post(add_position))
@@ -50,8 +60,18 @@ pub fn router(state: AppState) -> Router {
         .route("/api/control", post(control))
         .route("/api/history", get(history))
         .route("/ws", get(ws::handler))
+        // Catches any other `/api/...` path so an unknown API route gets the usual
+        // typed 404 instead of falling through to the SPA's `index.html` below —
+        // matched only when nothing more specific above already matched, since axum's
+        // router prefers literal segments over a wildcard regardless of registration
+        // order.
+        .route("/api/{*rest}", any(api_not_found))
         .merge(storage_routes::router())
         .with_state(state)
+        // Everything that is not `/api/...` or `/ws` falls here: the built frontend,
+        // with any unmatched client-side route (e.g. a deep link) falling back to
+        // `index.html` so the SPA's own router can take over.
+        .fallback_service(static_service)
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .layer(TimeoutLayer::with_status_code(
@@ -59,6 +79,26 @@ pub fn router(state: AppState) -> Router {
             Duration::from_secs(5),
         ))
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
+}
+
+async fn api_not_found() -> ApiError {
+    ApiError::NotFound("no such API route".to_owned())
+}
+
+/// Sets `Cache-Control` on every static response: a year, immutable, for a file under
+/// Vite's hashed `/assets/` output directory (its URL changes whenever its content
+/// does); `no-cache` for everything else, in particular `index.html` itself and the
+/// SPA fallback that serves it for an unmatched client-side route, since that file's
+/// content can change on a new deploy without its URL changing at all.
+async fn static_cache_headers(uri: Uri, request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let value = if uri.path().starts_with("/assets/") {
+        HeaderValue::from_static("public, max-age=31536000, immutable")
+    } else {
+        HeaderValue::from_static("no-cache")
+    };
+    response.headers_mut().insert(header::CACHE_CONTROL, value);
+    response
 }
 
 /// `GET /api/health` response body.

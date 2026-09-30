@@ -1,0 +1,31 @@
+# Local-only compose file. No restart policy: the app runs only when I start it.
+services:
+  risk-monitor:
+    build:
+      context: .
+      args:
+        # Compose reads these from the shell environment (the Makefile's docker-build
+        # and docker-up targets set them), falling back to "unknown" and 1000 so a
+        # bare `docker compose build` still works. APP_UID/APP_GID, not UID/GID:
+        # bash's own UID is a readonly shell variable, so `UID=... docker compose ...`
+        # in the Makefile would fail to actually set it.
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        UID: ${APP_UID:-1000}
+        GID: ${APP_GID:-1000}
+    image: risk-monitor:local
+    ports:
+      # Bound to the loopback interface only, so nothing outside this machine can
+      # reach it even though the server binds 0.0.0.0 inside the container.
+      - "127.0.0.1:8080:8080"
+    environment:
+      # `${ALPHA_VANTAGE_API_KEY}` is resolved from the project's `.env` file, which
+      # Compose loads automatically for variable substitution (distinct from an
+      # `env_file:` directive). Only this one variable is passed through deliberately:
+      # `.env` also sets RRM_STORAGE_DIR for a host-side `cargo run`, which must not
+      # override the container's own /app/storage from the Dockerfile.
+      ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY}
+    volumes:
+      # Same storage folder `cargo run` uses, so a session recorded in Docker and one
+      # recorded outside it share the same sessions, portfolios and market-data
+      # archive.
+      - ../storage:/app/storage

@@ -151,10 +151,20 @@ pub fn test_router_with(
     limits: LimitsConfig,
     tick_interval: Duration,
 ) -> (Router, tempfile::TempDir) {
+    test_router_with_config(server_config(), limits, tick_interval)
+}
+
+/// As [`test_router_with`], but over a caller-chosen [`ServerConfig`] — in particular
+/// for overriding `static_dir` in a static-file-serving test.
+pub fn test_router_with_config(
+    config: ServerConfig,
+    limits: LimitsConfig,
+    tick_interval: Duration,
+) -> (Router, tempfile::TempDir) {
     let seed = seed_data();
-    let config = sim_config();
-    let feed = GbmSimulator::new(&seed, &config).unwrap();
-    let clock = SimClock::new(start(), config.speed).unwrap();
+    let sim = sim_config();
+    let feed = GbmSimulator::new(&seed, &sim).unwrap();
+    let clock = SimClock::new(start(), sim.speed).unwrap();
     let engine = Engine::new(
         clock,
         &seed,
@@ -174,7 +184,7 @@ pub fn test_router_with(
     );
     let state = AppState {
         engine: handle,
-        config: Arc::new(server_config()),
+        config: Arc::new(config),
         storage_config: Arc::new(storage_config()),
         storage_root,
         storage_warning: Arc::new(AtomicBool::new(false)),

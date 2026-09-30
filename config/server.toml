@@ -9,7 +9,9 @@ port = 8080
 # storage::StorageRoot::resolve().
 storage_dir = "../storage"
 
-# Built frontend assets (served from Part 14 onwards; unused before then).
+# Built frontend assets. Overridden to /app/frontend/dist by RRM_STATIC_DIR in Docker
+# (Part 17); harmless if the directory does not exist, such as running `cargo run`
+# against Vite's own dev server instead.
 static_dir = "frontend/dist"
 
 # Origins allowed by CORS. Vite's dev server.

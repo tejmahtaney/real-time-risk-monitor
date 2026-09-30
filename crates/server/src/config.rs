@@ -22,7 +22,10 @@ pub struct ServerConfig {
     /// Root of the runtime storage folder. Also read directly by
     /// `storage::StorageRoot`; kept here so it can be logged at startup.
     pub storage_dir: PathBuf,
-    /// Root the frontend's built static files are served from. Unused before Part 14.
+    /// Root the frontend's built static files are served from (`routes::router`'s
+    /// fallback service, wired in Part 17). A path that does not exist is not an
+    /// error: every request just falls through to a 404, which is the right thing
+    /// during local frontend development against Vite's own dev server instead.
     pub static_dir: PathBuf,
     /// Origins the CORS layer allows, such as `http://localhost:5173` for Vite.
     pub cors_origins: Vec<String>,

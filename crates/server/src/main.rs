@@ -16,6 +16,10 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--healthcheck") {
+        return run_healthcheck();
+    }
+
     dotenvy::dotenv().ok();
 
     tracing_subscriber::fmt()
@@ -124,6 +128,33 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// `risk-monitor --healthcheck`: a bare TCP `GET /api/health` against this same
+/// process's own port on localhost, for Docker's `HEALTHCHECK` instruction (the
+/// runtime image has no `curl`; see the Dockerfile). Exits 0 on any 2xx status line,
+/// 1 otherwise, including a connection failure — `ServerConfig::load` failing counts
+/// as a healthcheck failure too, via the `Err` this returns.
+fn run_healthcheck() -> anyhow::Result<()> {
+    use std::io::{Read, Write};
+    use std::net::{SocketAddr, TcpStream};
+
+    let config = ServerConfig::load().context("loading server config for the healthcheck")?;
+    let addr = SocketAddr::from(([127, 0, 0, 1], config.port));
+
+    let healthy = (|| -> std::io::Result<bool> {
+        let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2))?;
+        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+        stream.write_all(
+            b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        )?;
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response)?;
+        Ok(response.starts_with(b"HTTP/1.1 2") || response.starts_with(b"HTTP/1.0 2"))
+    })()
+    .unwrap_or(false);
+
+    std::process::exit(i32::from(!healthy));
 }
 
 /// Fetches (or reads from the archive/fallback) and calibrates the market seed data.
