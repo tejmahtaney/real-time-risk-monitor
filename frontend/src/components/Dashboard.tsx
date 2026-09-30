@@ -62,6 +62,7 @@ export function Dashboard(): ReactElement {
       <AlertsPane
         active={snapshot?.active_alerts ?? []}
         history={snapshot?.alert_history ?? []}
+        corporateActions={snapshot?.corporate_actions ?? []}
         className="lg:col-span-2"
       />
       <Controls paused={snapshot?.paused ?? null} clockSpeed={snapshot?.clock_speed ?? null} />

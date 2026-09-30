@@ -7,7 +7,7 @@ import type { PnlReport } from '../api/generated/PnlReport'
 import { PnlAttributionPanel } from './PnlAttributionPanel'
 
 function buckets(overrides: Partial<PnlBuckets> = {}): PnlBuckets {
-  return { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, higher_order: 0, residual: 0, actual: 0, ...overrides }
+  return { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, higher_order: 0, dividends: 0, residual: 0, actual: 0, ...overrides }
 }
 
 function report(overrides: Partial<PnlReport> = {}): PnlReport {

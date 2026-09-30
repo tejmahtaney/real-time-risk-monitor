@@ -67,9 +67,14 @@ entry_price: number,
  */
 unrealised_pnl: number, 
 /**
- * (intrinsic − entry) × quantity × multiplier once settled, otherwise zero.
+ * (intrinsic − entry) × quantity × multiplier once settled. For a live stock position,
+ * the cash dividends received so far, otherwise zero.
  */
 realised_pnl: number, 
+/**
+ * Whether a split changed this option's contract terms. Drives the "adj" badge.
+ */
+adjusted: boolean, 
 /**
  * Raw per-unit Greeks from `pricing`. Equity has delta 1 and the rest zero.
  */

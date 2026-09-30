@@ -40,4 +40,17 @@ entry_price: number | null,
 /**
  * Volatility override as a decimal. `None` means use the underlying's.
  */
-iv: number | null, };
+iv: number | null, 
+/**
+ * An option's contract multiplier. `None` means the standard 100. Ignored for equity.
+ */
+multiplier?: number, 
+/**
+ * Whether a split changed this option's terms. Display only: it drives the "adj" badge.
+ */
+adjusted?: boolean, 
+/**
+ * Ids of the split actions already reflected in this row's terms, so a reload of the
+ * book cannot apply them twice.
+ */
+applied_actions?: Array<string>, };

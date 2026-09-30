@@ -20,6 +20,7 @@ function point(secondsFromEpoch: number, seq: number): HistoryPoint {
       theta: 0,
       rho: 0,
       higher_order: 0,
+      dividends: 0,
       residual: 0,
       actual: 0,
     },

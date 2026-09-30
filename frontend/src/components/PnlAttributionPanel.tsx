@@ -27,6 +27,9 @@ const GAIN_COLOR = '#34d399' // --color-up
 const LOSS_COLOR = '#f87171' // --color-down
 const NEUTRAL_COLOR = '#9ca3af' // --color-neutral
 
+const DIVIDENDS_EXPLANATION =
+  "Cash received on an ex-date. The stock's price drop shows in Delta, and this is the cash that offsets it, so a holder's total is not distorted."
+
 const RESIDUAL_EXPLANATION =
   "The third-order and cross terms the Greeks above don't capture. Grows with step size and near expiry — not an error to hide."
 
@@ -52,6 +55,7 @@ function AttributionTooltip({ active, payload }: TooltipContentProps): ReactElem
       <div className="font-medium">{row.label}</div>
       <div className="tabular-nums">{formatCompactCurrency(row.value)}</div>
       {row.key === 'residual' && <p className="mt-1 text-neutral">{RESIDUAL_EXPLANATION}</p>}
+      {row.key === 'dividends' && <p className="mt-1 text-neutral">{DIVIDENDS_EXPLANATION}</p>}
     </div>
   )
 }

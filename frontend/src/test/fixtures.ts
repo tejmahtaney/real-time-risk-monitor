@@ -28,6 +28,7 @@ export function position(overrides: Partial<PositionRisk> = {}): PositionRisk {
     entry_price: 4,
     unrealised_pnl: 100,
     realised_pnl: 0,
+    adjusted: false,
     greeks: { ...ZERO_GREEKS },
     reporting: { ...ZERO_REPORTING },
     status: { state: 'active' },

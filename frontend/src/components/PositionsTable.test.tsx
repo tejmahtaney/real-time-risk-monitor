@@ -9,6 +9,21 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
+describe('PositionsTable adjusted contracts', () => {
+  it('marks an adjusted contract with an adj badge and no other row', () => {
+    render(
+      <PositionsTable
+        positions={[
+          position({ id: 'a', description: 'AAPL 2026-10-16 C 57.5', adjusted: true }),
+          position({ id: 'b', description: 'AAPL stock', kind: 'equity' }),
+        ]}
+      />,
+    )
+    expect(screen.getAllByTestId('adj-badge')).toHaveLength(1)
+    expect(screen.getByTestId('adj-badge')).toHaveTextContent('adj')
+  })
+})
+
 describe('PositionsTable grouping and subtotals', () => {
   it('groups rows under their underlying and shows a subtotal row', () => {
     render(

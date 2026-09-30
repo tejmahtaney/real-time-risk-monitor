@@ -17,6 +17,7 @@ const HEADLINE_BUCKETS: Array<{ key: keyof PnlBuckets; label: string }> = [
   { key: 'theta', label: 'theta' },
   { key: 'rho', label: 'rho' },
   { key: 'higher_order', label: 'higher-order effects' },
+  { key: 'dividends', label: 'dividends' },
 ]
 
 /** Signed currency with an explicit `+` on a positive value (`formatCompactCurrency`
@@ -33,8 +34,8 @@ function formatNet(value: number): string {
  *
  * > Today you made $2.1k from theta and lost $5.0k to vega. Net +$1.3k.
  *
- * Net is the sum of the six named buckets (`delta` + `gamma` + `vega` + `theta` +
- * `rho` + `higher_order`, i.e. `PnlBuckets::explained()`), not `actual` — the
+ * Net is the sum of the seven named buckets (`delta` + `gamma` + `vega` + `theta` +
+ * `rho` + `higher_order` + `dividends`, i.e. `PnlBuckets::explained()`), not `actual` — the
  * headline is built from, and only from, the buckets it names, per the prompt.
  *
  * A day with no losing bucket omits the "lost ... to ..." clause (and vice versa
@@ -49,7 +50,7 @@ export function buildHeadline(buckets: PnlBuckets): string {
   const losses = entries.filter((e) => e.value < 0)
 
   if (gains.length === 0 && losses.length === 0) {
-    return `Today's P&L was flat across delta, gamma, vega, theta, rho and higher-order effects. Net ${formatNet(net)}.`
+    return `Today's P&L was flat across delta, gamma, vega, theta, rho, higher-order effects and dividends. Net ${formatNet(net)}.`
   }
 
   const clauses: string[] = []

@@ -36,7 +36,7 @@ function snapshot(overrides: Partial<RiskSnapshot> = {}): RiskSnapshot {
     pnl: {
       session_date: '2026-09-28',
       portfolio: {
-        today: { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, higher_order: 0, residual: 0, actual: 0 },
+        today: { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, higher_order: 0, dividends: 0, residual: 0, actual: 0 },
         since_start: {
           delta: 0,
           gamma: 0,
@@ -44,6 +44,7 @@ function snapshot(overrides: Partial<RiskSnapshot> = {}): RiskSnapshot {
           theta: 0,
           rho: 0,
           higher_order: 0,
+          dividends: 0,
           residual: 0,
           actual: 0,
         },
@@ -52,6 +53,7 @@ function snapshot(overrides: Partial<RiskSnapshot> = {}): RiskSnapshot {
       by_position: {},
       previous_day: null,
     },
+    corporate_actions: [],
     active_alerts: [],
     limits: [],
     alert_history: [],

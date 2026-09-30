@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { PnlBuckets } from '../api/generated/PnlBuckets'
 import type { PnlReport } from '../api/generated/PnlReport'
-import { bucketRows, portfolioBucketsForPeriod, underlyingStacks } from './pnlAttribution'
+import { STACK_KEYS, bucketRows, portfolioBucketsForPeriod, underlyingStacks } from './pnlAttribution'
 
 function buckets(overrides: Partial<PnlBuckets> = {}): PnlBuckets {
-  return { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, higher_order: 0, residual: 0, actual: 0, ...overrides }
+  return { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, higher_order: 0, dividends: 0, residual: 0, actual: 0, ...overrides }
 }
 
 function report(overrides: Partial<PnlReport> = {}): PnlReport {
@@ -29,11 +29,20 @@ describe('bucketRows', () => {
       'theta',
       'rho',
       'higher_order',
+      'dividends',
       'residual',
       'actual',
     ])
     expect(rows.find((r) => r.key === 'delta')?.value).toBe(100)
     expect(rows.find((r) => r.key === 'actual')?.value).toBe(95)
+  })
+})
+
+describe('the dividends bucket', () => {
+  it('is drawn in the bar chart and the by-underlying stack, and carries the cash', () => {
+    const rows = bucketRows(buckets({ dividends: 250 }))
+    expect(rows.find((r) => r.key === 'dividends')).toEqual({ key: 'dividends', label: 'Dividends', value: 250 })
+    expect(STACK_KEYS).toContain('dividends')
   })
 })
 
@@ -83,6 +92,7 @@ describe('underlyingStacks', () => {
       theta: 0,
       rho: 0,
       higher_order: 0,
+      dividends: 0,
       residual: 0,
     })
     expect(spyStack?.values.actual).toBeUndefined()
@@ -102,6 +112,6 @@ describe('underlyingStacks', () => {
       },
     })
     const stacks = underlyingStacks(r, 'previous_day')
-    expect(stacks).toEqual([{ symbol: 'TSLA', values: { delta: 0, gamma: 0, vega: 42, theta: 0, rho: 0, higher_order: 0, residual: 0 } }])
+    expect(stacks).toEqual([{ symbol: 'TSLA', values: { delta: 0, gamma: 0, vega: 42, theta: 0, rho: 0, higher_order: 0, dividends: 0, residual: 0 } }])
   })
 })

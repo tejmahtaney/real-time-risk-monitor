@@ -399,7 +399,18 @@ function PositionRow({
       title={errorReason}
       data-testid="position-row"
     >
-      <td className="whitespace-nowrap px-2 py-1 text-left">{row.description}</td>
+      <td className="whitespace-nowrap px-2 py-1 text-left">
+        {row.description}
+        {row.adjusted && (
+          <span
+            className="ml-2 rounded border border-warning/60 px-1 text-[10px] font-semibold uppercase text-warning"
+            title="A corporate action adjusted this contract's strike or multiplier"
+            data-testid="adj-badge"
+          >
+            adj
+          </span>
+        )}
+      </td>
       <td className={`whitespace-nowrap px-2 py-1 text-right ${pulseClass('quantity')}`}>
         {formatCompactNumber(row.quantity)}
       </td>

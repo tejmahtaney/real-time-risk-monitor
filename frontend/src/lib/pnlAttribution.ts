@@ -21,6 +21,7 @@ export const BUCKET_ORDER: Array<{ key: keyof PnlBuckets; label: string }> = [
   { key: 'theta', label: 'Theta' },
   { key: 'rho', label: 'Rho' },
   { key: 'higher_order', label: 'Higher-order' },
+  { key: 'dividends', label: 'Dividends' },
   { key: 'residual', label: 'Residual' },
   { key: 'actual', label: 'Actual' },
 ]
@@ -36,6 +37,7 @@ export const STACK_KEYS: Array<keyof PnlBuckets> = [
   'theta',
   'rho',
   'higher_order',
+  'dividends',
   'residual',
 ]
 

@@ -56,6 +56,7 @@ function baseSnapshot(overrides: Partial<RiskSnapshot> = {}): RiskSnapshot {
           theta: 0,
           rho: 0,
           higher_order: 0,
+          dividends: 0,
           residual: 0,
           actual: 0,
         },
@@ -66,6 +67,7 @@ function baseSnapshot(overrides: Partial<RiskSnapshot> = {}): RiskSnapshot {
           theta: 0,
           rho: 0,
           higher_order: 0,
+          dividends: 0,
           residual: 0,
           actual: 0,
         },
@@ -74,6 +76,7 @@ function baseSnapshot(overrides: Partial<RiskSnapshot> = {}): RiskSnapshot {
       by_position: {},
       previous_day: null,
     },
+    corporate_actions: [],
     active_alerts: [],
     limits: [
       {

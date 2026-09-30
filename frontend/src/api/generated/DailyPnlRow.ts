@@ -33,7 +33,12 @@ rho: number,
  */
 higher_order: number, 
 /**
- * `actual` minus the six modelled buckets above, summed over the day.
+ * Cash dividends received on stock positions, summed over the day. Absent (zero) in
+ * files written before Part 19.
+ */
+dividends: number, 
+/**
+ * `actual` minus the modelled buckets above, summed over the day.
  */
 residual: number, 
 /**

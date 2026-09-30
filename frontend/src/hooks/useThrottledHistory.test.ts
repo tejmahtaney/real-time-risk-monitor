@@ -15,7 +15,7 @@ function point(seq: number): HistoryPoint {
     theta: 0,
     gross_exposure: 0,
     market_value: 0,
-    pnl_today: { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, higher_order: 0, residual: 0, actual: 0 },
+    pnl_today: { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, higher_order: 0, dividends: 0, residual: 0, actual: 0 },
     worst_limit_utilisation: 0,
     var_99: null,
   }

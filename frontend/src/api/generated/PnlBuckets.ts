@@ -14,8 +14,16 @@
  * - `theta` = Θ·dt·scale
  * - `rho` = ρ·dr·scale
  * - `higher_order` = (vanna·dS·dσ + ½·volga·dσ²)·scale
- * - `actual` = (V₁ − V₀)·scale, from full revaluation
+ * - `dividends` = the cash a stock position received on an ex-date, quantity × amount
+ * - `actual` = (V₁ − V₀)·scale, plus that cash, from full revaluation
  * - `residual` = `actual` − [`explained`](Self::explained)
+ *
+ * **Why `dividends` is its own bucket.** On the ex-date the stock price drops by the
+ * dividend. That drop is a real fall in the position's value and shows up in `delta` (and
+ * in `actual`), and the holder is paid the same amount in cash. Without a bucket for the
+ * cash, a stock holder's P&L would show a loss of quantity × dividend that never
+ * happened economically. The cash goes into `dividends` and into `actual` together, so
+ * the total is continuous across the ex-date and `residual` is untouched.
  *
  * The residual is not an error to hide: it holds the third-order and cross terms the
  * expansion leaves out, and it grows with step size and near expiry. Every field here
@@ -48,10 +56,16 @@ rho: number,
  */
 higher_order: number, 
 /**
- * `actual` − `explained()`: what the six buckets above do not account for.
+ * Cash dividends received on an ex-date: quantity × amount for a stock position, so a
+ * short position shows a negative figure. It is realised P&L, paid in cash.
+ */
+dividends: number, 
+/**
+ * `actual` − `explained()`: what the buckets above do not account for.
  */
 residual: number, 
 /**
- * (V₁ − V₀)·scale, from full revaluation. The true change in value for the tick.
+ * (V₁ − V₀)·scale from full revaluation, plus any dividend cash. The true change in
+ * value for the tick.
  */
 actual: number, };

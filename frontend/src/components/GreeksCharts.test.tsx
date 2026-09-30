@@ -16,7 +16,7 @@ function historyPoint(overrides: Partial<HistoryPoint> = {}): HistoryPoint {
     theta: -300,
     gross_exposure: 150_000,
     market_value: 10_000,
-    pnl_today: { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, higher_order: 0, residual: 0, actual: 0 },
+    pnl_today: { delta: 0, gamma: 0, vega: 0, theta: 0, rho: 0, higher_order: 0, dividends: 0, residual: 0, actual: 0 },
     worst_limit_utilisation: 0,
     var_99: null,
     ...overrides,

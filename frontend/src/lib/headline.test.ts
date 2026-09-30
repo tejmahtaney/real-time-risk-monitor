@@ -11,6 +11,7 @@ function buckets(overrides: Partial<PnlBuckets> = {}): PnlBuckets {
     theta: 0,
     rho: 0,
     higher_order: 0,
+    dividends: 0,
     residual: 0,
     actual: 0,
     ...overrides,
@@ -36,8 +37,13 @@ describe('buildHeadline', () => {
   it('an all-zero day gets its own flat sentence, naming no bucket', () => {
     const sentence = buildHeadline(buckets())
     expect(sentence).toBe(
-      "Today's P&L was flat across delta, gamma, vega, theta, rho and higher-order effects. Net $0.00.",
+      "Today's P&L was flat across delta, gamma, vega, theta, rho, higher-order effects and dividends. Net $0.00.",
     )
+  })
+
+  it('names dividends when cash is the biggest gain', () => {
+    const sentence = buildHeadline(buckets({ delta: -100, dividends: 100 }))
+    expect(sentence).toBe('Today you made $100 from dividends and lost $100 to delta. Net $0.00.')
   })
 
   it('ignores residual and actual entirely, even when they dwarf the named buckets', () => {

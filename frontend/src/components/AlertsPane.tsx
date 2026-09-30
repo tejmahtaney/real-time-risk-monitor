@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 
 import type { AlertEvent } from '../api/generated/AlertEvent'
+import type { CorporateActionEvent } from '../api/generated/CorporateActionEvent'
 import type { LimitStatus } from '../api/generated/LimitStatus'
 import { formatCompactCurrency, formatSimTime } from '../lib/format'
 import { limitLabel, scopeLabel, stateRank } from '../lib/limits'
@@ -18,14 +19,18 @@ function sortHistory(history: AlertEvent[]): AlertEvent[] {
 
 /** The alerts pane: active warnings and breaches at the top (severity, then
  * utilisation), history below (newest first), and a short border pulse when a
- * new breach arrives. Reads only its props, never the store directly. */
+ * new breach arrives. Corporate actions (splits and dividends) get their own
+ * information section: they are events, not limits, so they never count as an
+ * alert and never pulse the pane. Reads only its props, never the store directly. */
 export function AlertsPane({
   active,
   history,
+  corporateActions = [],
   className = '',
 }: {
   active: LimitStatus[]
   history: AlertEvent[]
+  corporateActions?: CorporateActionEvent[]
   className?: string
 }): ReactElement {
   const sortedHistory = sortHistory(history)
@@ -79,6 +84,27 @@ export function AlertsPane({
           ))
         )}
       </div>
+
+      {corporateActions.length > 0 && (
+        <div className="flex flex-col gap-1" data-testid="corporate-actions">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral">Corporate actions</h3>
+          <ul className="flex flex-col gap-1 text-sm">
+            {[...corporateActions].reverse().map((event) => (
+              <li
+                key={event.id}
+                className={`flex items-center justify-between gap-2 rounded px-2 py-1 ${
+                  event.outcome === 'failed' ? 'bg-warning/20 text-warning' : 'bg-info/15 text-info'
+                }`}
+                data-testid="corporate-action"
+                data-outcome={event.outcome}
+              >
+                <span className="text-neutral">{formatSimTime(event.sim_time)}</span>
+                <span className="flex-1">{event.message}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral">History</h3>
