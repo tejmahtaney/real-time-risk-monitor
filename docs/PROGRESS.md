@@ -295,7 +295,7 @@ Open issues: see the four Part 19 entries added above (OCC strike rounding, the 
 
 **New dependencies.** No new crates. Two feature changes: axum `multipart` (the upload route; pulls in `multer`) and serde_json `float_roundtrip` (workspace-wide: without it a finished run's `summary.json` read back can differ from the in-memory summary in the last bit, and the run must reload identically after a restart).
 
-**Tests.** 620 Rust tests pass (61 new: risk 9, domain 5, marketdata 22, storage 4, engine 18 in `tests/backtest.rs`, server 8 in `tests/backtests.rs`) and 178 frontend tests pass. fmt, clippy `-D warnings`, `npm run lint`, `typecheck` and `build` are clean.
+**Tests.** 620 Rust tests pass (61 new: domain 5, risk 10, marketdata 16, storage 4, engine 18 in `tests/backtest.rs`, server 8 in `tests/backtests.rs`) and 178 frontend tests pass. fmt, clippy `-D warnings`, `npm run lint`, `typecheck` and `build` are clean.
 
 **Real run** (archived Alpha Vantage history merged per symbol, sample portfolio, rolling on; run `20260930T124101Z-bkcz`, saved under `../storage/backtests/`). Prices 2026-05-05 to 2026-09-28 (1 date dropped for a symbol missing it), book resolved 2026-06-03, replayed 2026-06-04 to 2026-09-28: **n = 80 days**.
 - Total P&L +$111,503: delta +65.7k, gamma +116.4k, vega +33.1k, theta -64.0k, higher order -13.9k, residual -25.8k. Max drawdown $45.8k (2026-06-22 to 2026-07-20). Best day +$70.7k (2026-07-30), worst -$22.7k (2026-09-04). Limits in breach on 58 of 80 days. 112 options settled and rolled.
