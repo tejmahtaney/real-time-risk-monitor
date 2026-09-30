@@ -2,9 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::corporate_action::SpotAdjustment;
+use crate::dividend::CashDividend;
 use crate::error::{DomainError, finite};
 use crate::symbol::Symbol;
 
@@ -90,12 +92,18 @@ impl UnderlyingState {
 ///
 /// Underlyings are kept in a `BTreeMap`, so iteration order is by symbol and
 /// therefore deterministic. Deserialising validates the rate.
+///
+/// A symbol can be on the discrete dividend model: it then has an entry in the dividend
+/// schedule (possibly an empty one) and is priced with the escrowed model instead of its
+/// continuous yield. The schedule lives here, next to the spot, so every valuation path
+/// (positions, the resolve entry price, `VaR` repricing) reads it from the same place.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "RawMarket")]
 pub struct MarketState {
     as_of: DateTime<Utc>,
     rate: f64,
     underlyings: BTreeMap<Symbol, UnderlyingState>,
+    dividends: BTreeMap<Symbol, Vec<CashDividend>>,
 }
 
 #[derive(Deserialize)]
@@ -103,13 +111,15 @@ struct RawMarket {
     as_of: DateTime<Utc>,
     rate: f64,
     underlyings: BTreeMap<Symbol, UnderlyingState>,
+    #[serde(default)]
+    dividends: BTreeMap<Symbol, Vec<CashDividend>>,
 }
 
 impl TryFrom<RawMarket> for MarketState {
     type Error = DomainError;
 
     fn try_from(raw: RawMarket) -> Result<Self, Self::Error> {
-        Self::new(raw.as_of, raw.rate, raw.underlyings)
+        Self::new(raw.as_of, raw.rate, raw.underlyings)?.with_discrete_dividends(raw.dividends)
     }
 }
 
@@ -144,7 +154,89 @@ impl MarketState {
             as_of,
             rate,
             underlyings: underlyings.into_iter().collect(),
+            dividends: BTreeMap::new(),
         })
+    }
+
+    /// Puts the given symbols on the discrete dividend model with these schedules.
+    ///
+    /// Each schedule is sorted by ex-date. A symbol given an empty schedule is still on
+    /// the discrete model, so it prices with a yield of zero.
+    ///
+    /// # Errors
+    ///
+    /// [`DomainError::UnknownSymbol`] for a symbol the market has no data for, and
+    /// [`DomainError::InvalidDividendAmount`] for an amount that is not positive and finite.
+    pub fn with_discrete_dividends(
+        mut self,
+        schedules: impl IntoIterator<Item = (Symbol, Vec<CashDividend>)>,
+    ) -> Result<Self, DomainError> {
+        for (symbol, mut schedule) in schedules {
+            if !self.underlyings.contains_key(&symbol) {
+                return Err(DomainError::UnknownSymbol(symbol.to_string()));
+            }
+            for dividend in &schedule {
+                if !dividend.amount.is_finite() || dividend.amount <= 0.0 {
+                    return Err(DomainError::InvalidDividendAmount(dividend.amount));
+                }
+            }
+            schedule.sort_by_key(|dividend| dividend.ex_date);
+            self.dividends.insert(symbol, schedule);
+        }
+        Ok(self)
+    }
+
+    /// The pending dividend schedule of a symbol on the discrete model, or `None` when
+    /// the symbol uses its continuous yield.
+    pub fn dividends(&self, symbol: &Symbol) -> Option<&[CashDividend]> {
+        self.dividends.get(symbol).map(Vec::as_slice)
+    }
+
+    /// Removes and returns the dividends of `symbol` whose ex-date is on or before
+    /// `session_date`. A symbol not on the discrete model gives an empty list.
+    pub fn take_due_dividends(
+        &mut self,
+        symbol: &Symbol,
+        session_date: NaiveDate,
+    ) -> Vec<CashDividend> {
+        let Some(schedule) = self.dividends.get_mut(symbol) else {
+            return Vec::new();
+        };
+        let (due, pending): (Vec<CashDividend>, Vec<CashDividend>) =
+            schedule.iter().partition(|d| d.ex_date <= session_date);
+        *schedule = pending;
+        due
+    }
+
+    /// Divides every pending dividend of `symbol` by a split `ratio`, since a share of a
+    /// 4-for-1 split pays a quarter of the old dividend.
+    pub fn divide_dividends(&mut self, symbol: &Symbol, ratio: f64) {
+        if let Some(schedule) = self.dividends.get_mut(symbol) {
+            for dividend in schedule {
+                dividend.amount /= ratio;
+            }
+        }
+    }
+
+    /// Applies a split or dividend adjustment to one symbol's spot, keeping its vol and
+    /// yield and leaving `as_of` alone. Returns the new spot. The market is unchanged on error.
+    ///
+    /// # Errors
+    ///
+    /// [`DomainError::UnknownSymbol`] and the [`SpotAdjustment::apply`] errors.
+    pub fn adjust_spot(
+        &mut self,
+        symbol: &Symbol,
+        adjustment: SpotAdjustment,
+    ) -> Result<f64, DomainError> {
+        let current = self
+            .underlyings
+            .get(symbol)
+            .ok_or_else(|| DomainError::UnknownSymbol(symbol.to_string()))?;
+        let spot = adjustment.apply(current.spot())?;
+        let state = UnderlyingState::new(spot, current.vol(), current.dividend_yield())?;
+        self.underlyings.insert(symbol.clone(), state);
+        Ok(spot)
     }
 
     /// When the market state was observed.
@@ -347,6 +439,94 @@ mod tests {
         assert_relative_eq!(m.underlying(&sym("NVDA")).unwrap().spot(), 130.0);
         assert_eq!(m.as_of(), t());
         assert_relative_eq!(m.rate(), 0.04);
+    }
+
+    #[test]
+    fn dividend_schedule_round_trips_and_older_json_still_loads() {
+        let d = |m, day, amount| CashDividend {
+            ex_date: NaiveDate::from_ymd_opt(2026, m, day).unwrap(),
+            amount,
+        };
+        let m = MarketState::new(
+            t(),
+            0.04,
+            [(sym("SPY"), UnderlyingState::new(600.0, 0.16, 0.0).unwrap())],
+        )
+        .unwrap()
+        .with_discrete_dividends([(sym("SPY"), vec![d(12, 1, 2.0), d(11, 1, 1.0)])])
+        .unwrap();
+        // The schedule is sorted by ex-date.
+        assert_relative_eq!(m.dividends(&sym("SPY")).unwrap()[0].amount, 1.0);
+        let json = serde_json::to_string(&m).unwrap();
+        assert_eq!(serde_json::from_str::<MarketState>(&json).unwrap(), m);
+        let old = r#"{"as_of":"2026-10-01T14:30:00Z","rate":0.04,"underlyings":{"SPY":{"spot":600.0,"vol":0.16,"dividend_yield":0.0}}}"#;
+        assert!(
+            serde_json::from_str::<MarketState>(old)
+                .unwrap()
+                .dividends(&sym("SPY"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn dividends_can_only_be_scheduled_for_known_symbols_with_positive_amounts() {
+        let base = || {
+            MarketState::new(
+                t(),
+                0.04,
+                [(sym("SPY"), UnderlyingState::new(600.0, 0.16, 0.0).unwrap())],
+            )
+            .unwrap()
+        };
+        assert!(
+            base()
+                .with_discrete_dividends([(sym("AAPL"), vec![])])
+                .is_err()
+        );
+        let bad = CashDividend {
+            ex_date: NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
+            amount: -1.0,
+        };
+        assert!(
+            base()
+                .with_discrete_dividends([(sym("SPY"), vec![bad])])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn take_due_and_divide_and_adjust_spot() {
+        let d = |m, day, amount| CashDividend {
+            ex_date: NaiveDate::from_ymd_opt(2026, m, day).unwrap(),
+            amount,
+        };
+        let mut m = MarketState::new(
+            t(),
+            0.04,
+            [(sym("SPY"), UnderlyingState::new(600.0, 0.16, 0.0).unwrap())],
+        )
+        .unwrap()
+        .with_discrete_dividends([(sym("SPY"), vec![d(10, 5, 1.0), d(11, 1, 2.0)])])
+        .unwrap();
+        m.divide_dividends(&sym("SPY"), 4.0);
+        assert_relative_eq!(m.dividends(&sym("SPY")).unwrap()[1].amount, 0.5);
+        let due = m.take_due_dividends(&sym("SPY"), d(10, 5, 0.0).ex_date);
+        assert_eq!(due.len(), 1);
+        assert_relative_eq!(due[0].amount, 0.25);
+        assert_eq!(m.dividends(&sym("SPY")).unwrap().len(), 1);
+        let new_spot = m
+            .adjust_spot(&sym("SPY"), SpotAdjustment::DivideBy(2.0))
+            .unwrap();
+        assert_relative_eq!(new_spot, 300.0);
+        assert!(
+            m.adjust_spot(&sym("SPY"), SpotAdjustment::Subtract(300.0))
+                .is_err()
+        );
+        assert_relative_eq!(m.underlying(&sym("SPY")).unwrap().spot(), 300.0);
+        assert!(
+            m.take_due_dividends(&sym("AAPL"), t().date_naive())
+                .is_empty()
+        );
     }
 
     #[test]

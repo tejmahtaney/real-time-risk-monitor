@@ -74,6 +74,12 @@ impl From<PositionId> for String {
 /// so an option quoted at 3.20 has an entry price of 3.20 and costs
 /// 3.20 × multiplier per contract. `iv_override`, when set, replaces the
 /// underlying's volatility for this position only.
+///
+/// `applied_actions` lists the ids of the split actions already reflected in this
+/// position's terms (quantity, entry price, strike, multiplier). It is what stops a
+/// split being applied twice when a book is reloaded. `adjusted` is separate and is only
+/// the display flag behind the "adj" badge: an option whose terms a split changed.
+/// Both default when absent, so older saved books still load.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Position {
     /// Unique id within a book.
@@ -86,6 +92,12 @@ pub struct Position {
     pub entry_price: f64,
     /// Volatility to use instead of the underlying's, as a decimal.
     pub iv_override: Option<f64>,
+    /// Ids of the split actions already reflected in this position's terms.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applied_actions: Vec<String>,
+    /// Whether a split changed this option's contract terms. Display only.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub adjusted: bool,
 }
 
 impl Position {
@@ -130,6 +142,8 @@ impl Position {
             quantity,
             entry_price,
             iv_override,
+            applied_actions: Vec::new(),
+            adjusted: false,
         })
     }
 }

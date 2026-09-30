@@ -8,6 +8,8 @@
 #![warn(missing_docs)]
 
 mod clock;
+mod corporate_action;
+mod dividend;
 mod error;
 mod instrument;
 mod market;
@@ -17,13 +19,15 @@ mod symbol;
 mod time;
 
 pub use clock::{Clock, FixedClock};
+pub use corporate_action::{CorporateAction, SpotAdjustment, is_whole_number_forward_split};
+pub use dividend::{CashDividend, Escrow, escrow, ex_instant};
 pub use error::DomainError;
 pub use instrument::{DEFAULT_MULTIPLIER, Instrument, InstrumentKind, OptionContract};
 pub use market::{MarketState, UnderlyingState};
 pub use position::{Position, PositionId};
 pub use pricing::OptionType;
 pub use sim_clock::{
-    ClockStep, SimClock, StepKind, TRADING_SECONDS_PER_YEAR, next_session_open_after,
+    ClockStep, SimClock, StepKind, TRADING_SECONDS_PER_YEAR, add_sessions, next_session_open_after,
 };
 pub use symbol::Symbol;
 pub use time::{MARKET_TZ, market_date, year_fraction};

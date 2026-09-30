@@ -104,7 +104,7 @@ fn new_york_instant(date: NaiveDate, hour: u32, minute: u32) -> DateTime<Utc> {
     }
 }
 
-fn session_open(date: NaiveDate) -> DateTime<Utc> {
+pub(crate) fn session_open(date: NaiveDate) -> DateTime<Utc> {
     new_york_instant(date, 9, 30)
 }
 
@@ -128,6 +128,23 @@ fn next_session_date(date: NaiveDate) -> NaiveDate {
             return next;
         }
     }
+}
+
+/// The session date `sessions` weekdays after `date`, so 0 gives `date` itself.
+///
+/// Exchange holidays are ignored, as everywhere in the simulated clock. Corporate-action
+/// dates written as `+2d` count sessions from the simulation start with this.
+///
+/// ```
+/// use chrono::NaiveDate;
+/// use domain::add_sessions;
+///
+/// let thursday = NaiveDate::from_ymd_opt(2026, 10, 1).unwrap();
+/// // Friday is one session on, the following Monday is two.
+/// assert_eq!(add_sessions(thursday, 2), NaiveDate::from_ymd_opt(2026, 10, 5).unwrap());
+/// ```
+pub fn add_sessions(date: NaiveDate, sessions: u32) -> NaiveDate {
+    (0..sessions).fold(date, |day, _| next_session_date(day))
 }
 
 /// The first session open (09:30 New York, as a UTC instant) on a weekday strictly after `date`.

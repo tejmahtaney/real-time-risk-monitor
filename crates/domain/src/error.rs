@@ -40,6 +40,28 @@ pub enum DomainError {
     /// A market update named a symbol the market has no data for.
     #[error("market has no data for {0}")]
     UnknownSymbol(String),
+    /// A split ratio must be finite, positive and not 1.
+    #[error("split ratio must be finite, positive and not 1, got {0}")]
+    InvalidSplitRatio(f64),
+    /// A cash dividend must be finite and strictly positive.
+    #[error("dividend amount must be positive, got {0}")]
+    InvalidDividendAmount(f64),
+    /// A spot adjustment would leave the spot at or below zero.
+    #[error("adjusting spot {spot} would leave a non-positive price {result}")]
+    NonPositiveAdjustedSpot {
+        /// Spot before the adjustment.
+        spot: f64,
+        /// The rejected result.
+        result: f64,
+    },
+    /// The escrowed spot S − ΣPV(D) is not positive, so the option cannot be priced.
+    #[error("escrowed spot is not positive: spot {spot} minus dividend present value {pv}")]
+    EscrowedSpotNonPositive {
+        /// The spot the escrow was taken from.
+        spot: f64,
+        /// The present value of the dividends before expiry.
+        pv: f64,
+    },
 }
 
 /// Checks that `value` is finite, naming `field` on failure.
