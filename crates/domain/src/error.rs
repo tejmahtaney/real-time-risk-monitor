@@ -37,6 +37,9 @@ pub enum DomainError {
     /// A clock speed must be finite and strictly positive.
     #[error("clock speed must be finite and positive, got {0}")]
     InvalidSpeed(f64),
+    /// A replay clock was given dates it cannot walk.
+    #[error("invalid replay: {0}")]
+    InvalidReplay(String),
     /// A market update named a symbol the market has no data for.
     #[error("market has no data for {0}")]
     UnknownSymbol(String),

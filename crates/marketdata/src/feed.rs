@@ -81,6 +81,14 @@ pub trait PriceFeed {
         let _ = (symbol, adjustment);
         Err(FeedError::Unsupported("spot adjustments"))
     }
+
+    /// Whether the spots this feed emits already fall on a cash dividend's ex-date, as real
+    /// closes do. When true the engine still pays and records a dividend but does not lower the
+    /// spot itself, so the fall is not counted twice. False for a simulated feed, which has no
+    /// such knowledge and needs the engine to drop the price.
+    fn prices_include_dividends(&self) -> bool {
+        false
+    }
 }
 
 /// A price feed could not be built or stepped.

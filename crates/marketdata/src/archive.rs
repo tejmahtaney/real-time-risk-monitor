@@ -1,8 +1,9 @@
 //! The local archive of every download: `market-data/{SYMBOL}/<UTC timestamp>-daily.json`.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use domain::Symbol;
 use serde::{Deserialize, Serialize};
 use storage::{StorageRoot, list, read_json, write_json_new};
@@ -37,6 +38,19 @@ pub struct ArchiveHit {
     pub bars: Vec<DailyBar>,
 }
 
+/// Every archived download of one symbol merged into one series.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MergedHistory {
+    /// One bar per date, oldest first. Where downloads overlap the newest one's close is used.
+    pub bars: Vec<DailyBar>,
+    /// Archive files merged.
+    pub files_read: usize,
+    /// Archive files skipped because they did not parse.
+    pub files_skipped: usize,
+    /// Dates on which two downloads disagreed by more than 1e-9 in relative terms.
+    pub conflicts: usize,
+}
+
 /// The archive folder inside a storage root. Nothing in it is ever overwritten or deleted.
 #[derive(Debug, Clone)]
 pub struct Archive {
@@ -68,6 +82,56 @@ impl Archive {
         };
         let dir = self.root.subdir(&[FOLDER, symbol.as_str()])?;
         Ok(write_json_new(&dir, STEM, now, &record)?)
+    }
+
+    /// Every usable archive file for `symbol`, merged into one history without duplicate dates.
+    ///
+    /// Each free download holds only the latest 100 days, so the more often the app has fetched,
+    /// the longer the merged history. Files are read oldest to newest, so where two downloads hold
+    /// the same date the newer one wins; a disagreement is counted and logged, as it means the
+    /// vendor restated a close. A file that does not parse is skipped with a warning.
+    ///
+    /// # Errors
+    ///
+    /// [`MarketDataError::Storage`] when the folder cannot be read or the path is unsafe.
+    pub fn merged_history(&self, symbol: &Symbol) -> Result<MergedHistory, MarketDataError> {
+        let dir = self.root.join(&[FOLDER, symbol.as_str()])?;
+        let mut by_date: BTreeMap<NaiveDate, f64> = BTreeMap::new();
+        let (mut files_read, mut files_skipped, mut conflicts) = (0, 0, 0);
+        for path in list(&dir)? {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let bars = read_json::<ArchiveRecord>(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|record| parse_daily_body(&record.body).map_err(|e| e.to_string()));
+            let bars = match bars {
+                Ok(bars) => bars,
+                Err(reason) => {
+                    tracing::warn!(file = %path.display(), %reason, "skipping unusable archive file");
+                    files_skipped += 1;
+                    continue;
+                }
+            };
+            files_read += 1;
+            for bar in bars {
+                if let Some(old) = by_date.insert(bar.date, bar.close)
+                    && (old - bar.close).abs() > 1e-9 * old.abs()
+                {
+                    conflicts += 1;
+                    tracing::warn!(%symbol, date = %bar.date, old, new = bar.close, "archive downloads disagree on a close; the newer one is used");
+                }
+            }
+        }
+        Ok(MergedHistory {
+            bars: by_date
+                .into_iter()
+                .map(|(date, close)| DailyBar { date, close })
+                .collect(),
+            files_read,
+            files_skipped,
+            conflicts,
+        })
     }
 
     /// The newest usable archive file for `symbol`.
@@ -181,6 +245,79 @@ mod tests {
         assert!(archive.newest(&sym("SPY"), later, day).unwrap().is_none());
         // Any age still finds it.
         assert!(archive.newest(&sym("SPY"), later, None).unwrap().is_some());
+    }
+
+    #[test]
+    fn two_overlapping_downloads_merge_into_one_series_without_duplicate_dates() {
+        let (dir, archive) = archive();
+        let symbol = sym("SPY");
+        let save = |bars: &[(&str, f64)], hour: u32| {
+            let raw_body = sample_body("SPY", bars);
+            let download = Download {
+                bars: parse_daily_body(&raw_body).unwrap(),
+                raw_body,
+                params: RequestParams {
+                    function: "TIME_SERIES_DAILY".into(),
+                    symbol: "SPY".into(),
+                    outputsize: "compact".into(),
+                    datatype: "json".into(),
+                },
+            };
+            archive.save(&symbol, &download, at(hour)).unwrap();
+        };
+        save(
+            &[
+                ("2026-09-21", 10.0),
+                ("2026-09-22", 11.0),
+                ("2026-09-23", 12.0),
+            ],
+            1,
+        );
+        // Overlaps on the 22nd and 23rd, restating the 23rd, and adds two later days.
+        save(
+            &[
+                ("2026-09-22", 11.0),
+                ("2026-09-23", 12.5),
+                ("2026-09-24", 13.0),
+                ("2026-09-25", 14.0),
+            ],
+            2,
+        );
+        std::fs::write(
+            dir.path()
+                .join("market-data")
+                .join("SPY")
+                .join("20260926T030000Z-daily.json"),
+            "{ nope",
+        )
+        .unwrap();
+
+        let merged = archive.merged_history(&symbol).unwrap();
+        let dates: Vec<String> = merged.bars.iter().map(|b| b.date.to_string()).collect();
+        assert_eq!(
+            dates,
+            [
+                "2026-09-21",
+                "2026-09-22",
+                "2026-09-23",
+                "2026-09-24",
+                "2026-09-25"
+            ]
+        );
+        // The newer download wins on the restated date.
+        assert_relative_eq!(merged.bars[2].close, 12.5);
+        assert_eq!(
+            (merged.files_read, merged.files_skipped, merged.conflicts),
+            (2, 1, 1)
+        );
+        // Nothing archived for another symbol.
+        assert!(
+            archive
+                .merged_history(&sym("AAPL"))
+                .unwrap()
+                .bars
+                .is_empty()
+        );
     }
 
     #[test]

@@ -21,6 +21,7 @@ mod error;
 mod fallback;
 mod feed;
 mod loader;
+mod replay;
 mod seed;
 mod simulation_config;
 mod simulator;
@@ -29,18 +30,22 @@ mod source;
 pub use actions_source::{
     ActionsArchiveRecord, load_upcoming_dividends, parse_dividends_body, upcoming_dividend_actions,
 };
-pub use archive::{Archive, ArchiveHit, ArchiveRecord};
+pub use archive::{Archive, ArchiveHit, ArchiveRecord, MergedHistory};
 pub use calibration::{EWMA_LAMBDA, TRADING_DAYS_PER_YEAR, calibrate};
 pub use clock::SystemClock;
 pub use config::{ConfigError, DataMode, DividendModel, MarketConfig, VolMethod};
 pub use corporate_actions::{
     ActionsSourceConfig, CorporateActionCalendar, CorporateActionError, CorporateActionsConfig,
-    DividendEntry, EventDate, ScheduledAction, SplitEntry, apply_ledger_to_seed,
+    DatedActions, DividendEntry, EventDate, ScheduledAction, SplitEntry, apply_ledger_to_seed,
 };
 pub use error::{CalibrationError, MarketDataError};
 pub use fallback::{fallback_path, read_fallback, write_fallback};
 pub use feed::{FeedError, MarketTick, PriceFeed, Quote};
 pub use loader::{DataSource, HistoryLoader, LoadedHistory};
+pub use replay::{
+    MIN_REPLAY_DATES, PriceBreak, PriceTable, ROLLING_VOL_WINDOW, RawPrices, ReplayDataError,
+    ReplayFeed, VarWindow, WARM_UP_DATES,
+};
 pub use seed::{SeedData, SymbolSeed};
 pub use simulation_config::{SimulationConfig, VolProcessConfig};
 pub use simulator::GbmSimulator;

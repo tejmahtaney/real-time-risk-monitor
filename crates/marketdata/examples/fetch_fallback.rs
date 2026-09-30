@@ -50,7 +50,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             DataSource::Api { .. } => "downloaded now",
             DataSource::Archive { .. } => "reused a fresh archive file",
             DataSource::StaleArchive { .. } => "reused a stale archive file (API failed)",
-            DataSource::Fallback { .. } => return Err("unexpected fallback source".into()),
+            DataSource::Fallback { .. } | DataSource::Replay { .. } => {
+                return Err("unexpected fallback source".into());
+            }
         };
         let path = write_fallback(fallback_dir, symbol, &loaded.bars)?;
         println!(

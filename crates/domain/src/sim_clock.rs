@@ -108,7 +108,7 @@ pub(crate) fn session_open(date: NaiveDate) -> DateTime<Utc> {
     new_york_instant(date, 9, 30)
 }
 
-fn session_close(date: NaiveDate) -> DateTime<Utc> {
+pub(crate) fn session_close(date: NaiveDate) -> DateTime<Utc> {
     new_york_instant(date, 16, 0)
 }
 

@@ -109,7 +109,7 @@ fn clean(symbol: &Symbol, bars: &[DailyBar]) -> Result<Vec<DailyBar>, Calibratio
 }
 
 /// Log returns ln(Cₜ / Cₜ₋₁) of consecutive closes.
-fn log_returns(closes: &[f64]) -> Vec<f64> {
+pub(crate) fn log_returns(closes: &[f64]) -> Vec<f64> {
     closes
         .windows(2)
         .filter_map(|w| match w {
@@ -120,7 +120,7 @@ fn log_returns(closes: &[f64]) -> Vec<f64> {
 }
 
 /// Realised volatility: sample standard deviation (n − 1) times √252.
-fn realised_vol(returns: &[f64]) -> f64 {
+pub(crate) fn realised_vol(returns: &[f64]) -> f64 {
     let n = returns.len() as f64;
     let mean = returns.iter().sum::<f64>() / n;
     let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
@@ -140,14 +140,14 @@ fn ewma_variance(returns: &[f64]) -> f64 {
 }
 
 /// EWMA volatility: `RiskMetrics` recursion with λ = 0.94, times √252.
-fn ewma_vol(returns: &[f64]) -> f64 {
+pub(crate) fn ewma_vol(returns: &[f64]) -> f64 {
     (ewma_variance(returns) * TRADING_DAYS_PER_YEAR).sqrt()
 }
 
 /// Pearson correlation matrix of the columns. The diagonal is exactly 1, each pair is
 /// computed once in a fixed order so the matrix is exactly symmetric, and values are
 /// clamped to [−1, 1] against rounding.
-fn correlation_matrix(
+pub(crate) fn correlation_matrix(
     symbols: &[Symbol],
     columns: &[Vec<f64>],
 ) -> Result<Vec<Vec<f64>>, CalibrationError> {

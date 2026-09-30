@@ -249,6 +249,15 @@ pub struct ScheduledAction {
     pub action: CorporateAction,
 }
 
+/// What [`CorporateActionCalendar::resolve_dated`] left out of a replay's calendar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DatedActions {
+    /// Entries written as `+Nd`, which belong to live mode.
+    pub relative: usize,
+    /// Absolute entries before the start or after the end of the replay.
+    pub outside_window: usize,
+}
+
 /// The actions still to come, in date order, with dates resolved against the start.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CorporateActionCalendar {
@@ -295,6 +304,68 @@ impl CorporateActionCalendar {
         let mut calendar = Self { actions };
         calendar.retain_after(start);
         Ok(calendar)
+    }
+
+    /// Resolves only the actions written with an absolute date that falls inside a replay:
+    /// after `start` (actions apply at a later open) and on or before `end`.
+    ///
+    /// Relative `+Nd` entries are demo events for the live simulation, which always starts on the
+    /// same date; they mean nothing on a historical timeline and are skipped. The returned
+    /// [`DatedActions`] counts what was left out so the caller can log it. The optional
+    /// Alpha Vantage loader is not consulted.
+    ///
+    /// # Errors
+    ///
+    /// [`CorporateActionError::Invalid`] for a ratio or amount the domain rejects.
+    pub fn resolve_dated(
+        config: &CorporateActionsConfig,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<(Self, DatedActions), CorporateActionError> {
+        let mut left_out = DatedActions::default();
+        let mut actions = Vec::new();
+        let mut window = |id: &str, date: EventDate| match date {
+            EventDate::Sessions(_) => {
+                left_out.relative += 1;
+                tracing::info!(%id, "relative corporate action skipped: it belongs to live mode");
+                None
+            }
+            EventDate::Absolute(day) if day <= start || day > end => {
+                left_out.outside_window += 1;
+                tracing::info!(%id, date = %day, "corporate action is outside the replay window");
+                None
+            }
+            EventDate::Absolute(day) => Some(day),
+        };
+        for split in &config.splits {
+            if let Some(day) = window(&split.id, split.effective) {
+                let action = CorporateAction::split(split.symbol.clone(), split.ratio, day)
+                    .map_err(|e| invalid_entry(&split.id, &e))?;
+                actions.push(ScheduledAction {
+                    id: split.id.clone(),
+                    action,
+                });
+            }
+        }
+        for dividend in &config.dividends {
+            if let Some(day) = window(&dividend.id, dividend.ex_date) {
+                let action =
+                    CorporateAction::cash_dividend(dividend.symbol.clone(), dividend.amount, day)
+                        .map_err(|e| invalid_entry(&dividend.id, &e))?;
+                actions.push(ScheduledAction {
+                    id: dividend.id.clone(),
+                    action,
+                });
+            }
+        }
+        let mut calendar = Self { actions };
+        calendar.sort();
+        Ok((calendar, left_out))
+    }
+
+    /// Keeps only the actions for which `keep` is true.
+    pub fn retain(&mut self, mut keep: impl FnMut(&ScheduledAction) -> bool) {
+        self.actions.retain(|scheduled| keep(scheduled));
     }
 
     fn retain_after(&mut self, start: NaiveDate) {
@@ -532,6 +603,36 @@ mod tests {
         // From a later start the absolute date is in the past and disappears.
         let later = CorporateActionCalendar::resolve(&config, date(2026, 10, 8)).unwrap();
         assert!(later.pending().iter().all(|a| a.id != "tsla-3-for-2"));
+    }
+
+    #[test]
+    fn a_replay_calendar_takes_only_absolute_dates_inside_the_window() {
+        let config = CorporateActionsConfig::from_toml_str(TOML).unwrap();
+        // The relative demo events are for live mode. Only the TSLA split has an absolute date.
+        let (calendar, left_out) =
+            CorporateActionCalendar::resolve_dated(&config, start(), date(2026, 12, 31)).unwrap();
+        let ids: Vec<_> = calendar.pending().iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["tsla-3-for-2"]);
+        assert_eq!(
+            left_out,
+            DatedActions {
+                relative: 2,
+                outside_window: 0
+            }
+        );
+        // A window that ends before it, or starts on it, leaves it out.
+        let (before, out) =
+            CorporateActionCalendar::resolve_dated(&config, start(), date(2026, 10, 7)).unwrap();
+        assert!(before.pending().is_empty());
+        assert_eq!(out.outside_window, 1);
+        let (on_start, _) =
+            CorporateActionCalendar::resolve_dated(&config, date(2026, 10, 8), date(2026, 12, 1))
+                .unwrap();
+        assert!(on_start.pending().is_empty());
+        // The end date itself is inside the window.
+        let (on_end, _) =
+            CorporateActionCalendar::resolve_dated(&config, start(), date(2026, 10, 8)).unwrap();
+        assert_eq!(on_end.pending().len(), 1);
     }
 
     #[test]

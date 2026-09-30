@@ -38,6 +38,11 @@ pub enum DataSource {
         /// The fallback file.
         file: String,
     },
+    /// Prices replayed by the backtester: an uploaded file or the merged local archive.
+    Replay {
+        /// Where the replayed prices came from, such as `upload` or `archive`.
+        origin: String,
+    },
 }
 
 /// One symbol's daily bars and where they came from.
