@@ -9,7 +9,8 @@ use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
 use domain::{
-    AppliedAction, ClockStep, CorporateAction, MarketState, PositionId, SpotAdjustment, Symbol,
+    AppliedAction, ClockStep, CorporateAction, EngineClock, MarketState, PositionId,
+    SpotAdjustment, Symbol,
 };
 use marketdata::{CorporateActionCalendar, PriceFeed, ScheduledAction};
 use portfolio::{AppliedSplit, ledger_splits};
@@ -113,7 +114,7 @@ pub(crate) fn missing_splits<'a>(
         .filter(move |s| &s.symbol == symbol && !applied.contains(&s.id))
 }
 
-impl<F: PriceFeed> Engine<F> {
+impl<F: PriceFeed, C: EngineClock> Engine<F, C> {
     /// The ledgered splits, for loading books.
     pub(crate) fn applied_splits(&self) -> Vec<AppliedSplit> {
         ledger_splits(&self.ledger)

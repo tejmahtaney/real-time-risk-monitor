@@ -18,7 +18,7 @@ mod sim_clock;
 mod symbol;
 mod time;
 
-pub use clock::{Clock, FixedClock};
+pub use clock::{Clock, EngineClock, FixedClock};
 pub use corporate_action::{
     AppliedAction, CorporateAction, SpotAdjustment, is_whole_number_forward_split,
 };

@@ -7,7 +7,7 @@ use chrono::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::clock::Clock;
+use crate::clock::{Clock, EngineClock};
 use crate::error::DomainError;
 use crate::time::{MARKET_TZ, market_date, year_fraction};
 
@@ -314,6 +314,32 @@ impl Clock for SimClock {
     }
 }
 
+impl EngineClock for SimClock {
+    fn advance(&mut self, real_elapsed: Duration) -> ClockStep {
+        SimClock::advance(self, real_elapsed)
+    }
+
+    fn speed(&self) -> f64 {
+        SimClock::speed(self)
+    }
+
+    fn set_speed(&mut self, speed: f64) -> Result<(), DomainError> {
+        SimClock::set_speed(self, speed)
+    }
+
+    fn pause(&mut self) {
+        SimClock::pause(self);
+    }
+
+    fn resume(&mut self) {
+        SimClock::resume(self);
+    }
+
+    fn is_paused(&self) -> bool {
+        SimClock::is_paused(self)
+    }
+}
+
 fn check_speed(speed: f64) -> Result<(), DomainError> {
     if speed.is_finite() && speed > 0.0 {
         Ok(())
@@ -590,6 +616,21 @@ mod tests {
         let step = clock.advance(Duration::from_millis(1));
         assert_eq!(step.to - step.from, ChronoDuration::milliseconds(2));
         assert_relative_eq!(step.calendar_years, 0.002 / (365.0 * 86_400.0));
+    }
+
+    #[test]
+    fn sim_clock_drives_through_the_engine_clock_trait() {
+        fn run<C: EngineClock>(clock: &mut C) -> ClockStep {
+            clock.set_speed(240.0).unwrap();
+            clock.pause();
+            assert!(clock.is_paused());
+            clock.resume();
+            assert_relative_eq!(clock.speed(), 240.0);
+            clock.advance(REAL_TICK)
+        }
+        let mut clock = SimClock::new(monday_open(), 120.0).unwrap();
+        let step = run(&mut clock);
+        assert_eq!(step.to - step.from, ChronoDuration::seconds(60));
     }
 
     #[test]

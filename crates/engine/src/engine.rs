@@ -10,7 +10,8 @@ use std::sync::atomic::AtomicU64;
 
 use chrono::Utc;
 use domain::{
-    AppliedAction, Clock, ClockStep, MarketState, Position, SimClock, StepKind, Symbol, market_date,
+    AppliedAction, Clock, ClockStep, EngineClock, MarketState, Position, SimClock, StepKind,
+    Symbol, market_date,
 };
 use marketdata::{CorporateActionCalendar, PriceFeed, SeedData};
 use portfolio::{
@@ -43,8 +44,8 @@ const MAX_SPEED: f64 = 3600.0;
 /// Owns the position book, price feed, clock, market state, P&L attributor and limit
 /// monitor. Generic over the feed so tests can plug in a fake that fails on command;
 /// production code instantiates `Engine<marketdata::GbmSimulator>` exactly once.
-pub struct Engine<F: PriceFeed> {
-    clock: SimClock,
+pub struct Engine<F: PriceFeed, C: EngineClock = SimClock> {
+    clock: C,
     pub(crate) feed: F,
     pub(crate) market: MarketState,
     pub(crate) book: PositionBook,
@@ -81,7 +82,7 @@ pub struct Engine<F: PriceFeed> {
     pub(crate) corporate_events: VecDeque<CorporateActionEvent>,
 }
 
-impl<F: PriceFeed> Engine<F> {
+impl<F: PriceFeed, C: EngineClock> Engine<F, C> {
     /// Builds an engine and publishes its first ("tick 0") snapshot immediately: resolves
     /// the starting positions against the seed's market state, seeds the P&L attributor
     /// with the session's opening valuation via a zero-length `ClockStep` (so the first
@@ -116,7 +117,7 @@ impl<F: PriceFeed> Engine<F> {
     // a builder or config struct would only move the same nine names one level down.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        clock: SimClock,
+        clock: C,
         seed: &SeedData,
         feed: F,
         specs: &[PositionSpec],
@@ -154,7 +155,7 @@ impl<F: PriceFeed> Engine<F> {
     /// As [`Self::new`].
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_actions(
-        clock: SimClock,
+        clock: C,
         seed: &SeedData,
         feed: F,
         specs: &[PositionSpec],
@@ -604,6 +605,7 @@ impl<F: PriceFeed> Engine<F> {
     ) -> (EngineHandle, tokio::task::JoinHandle<()>)
     where
         F: Send + 'static,
+        C: Send + 'static,
     {
         let (snapshot_tx, snapshot_rx) = watch::channel(self.last_snapshot.clone());
         let (alert_tx, _alert_rx) = broadcast::channel(256);
