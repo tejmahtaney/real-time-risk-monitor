@@ -3,4 +3,4 @@
 /**
  * Which limit a [`LimitStatus`] or [`AlertEvent`] is about.
  */
-export type LimitKind = "portfolio_dollar_delta" | "portfolio_dollar_gamma1_pct" | "portfolio_vega" | "portfolio_theta_floor" | "gross_exposure" | "concentration" | "underlying_dollar_delta";
+export type LimitKind = "portfolio_dollar_delta" | "portfolio_dollar_gamma1_pct" | "portfolio_vega" | "portfolio_theta_floor" | "gross_exposure" | "concentration" | "underlying_dollar_delta" | "portfolio_var99";

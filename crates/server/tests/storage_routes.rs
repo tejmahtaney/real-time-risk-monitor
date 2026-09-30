@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use engine::{Engine, FixedClock, GbmSimulator, SimClock};
+use engine::{Engine, FixedClock, GbmSimulator, SimClock, VarMethod};
 use serde_json::json;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -145,6 +145,7 @@ async fn restart_with_last_restores_the_book_from_current_json() {
         Box::new(FixedClock::new(support::start())),
         2_400,
         support::RNG_SEED,
+        VarMethod::DeltaGammaMc,
     )
     .unwrap();
     let shutdown = CancellationToken::new();
@@ -193,6 +194,7 @@ async fn restart_with_last_restores_the_book_from_current_json() {
         Box::new(FixedClock::new(support::start())),
         2_400,
         support::RNG_SEED,
+        VarMethod::DeltaGammaMc,
     )
     .unwrap();
     let restarted_ids: Vec<String> = restarted

@@ -13,6 +13,10 @@
 //! [`LimitMonitor`] evaluates a [`RiskSummary`] against a [`LimitsConfig`] on every tick,
 //! tracking each limit's utilisation, warning and breach state with hysteresis and raising
 //! an [`AlertEvent`] only when a state changes.
+//!
+//! [`VarCalculator`] computes one-day Value at Risk and Expected Shortfall by three
+//! methods (delta-normal, delta-gamma Monte Carlo, historical simulation) into a
+//! [`VarReport`], per Part 18.
 
 #![warn(missing_docs)]
 
@@ -21,11 +25,15 @@ mod attributor;
 mod limits;
 mod monitor;
 mod pnl;
+mod risk_config;
 mod summary;
+mod var;
 
 pub use aggregate::aggregate;
 pub use attributor::PnlAttributor;
 pub use limits::{LimitsConfig, LimitsConfigError, PortfolioLimits, UnderlyingDeltaLimit};
 pub use monitor::{AlertEvent, LimitKind, LimitMonitor, LimitState, LimitStatus, Scope};
 pub use pnl::{PnlBuckets, PnlLevel, PnlReport, PreviousDay};
+pub use risk_config::{RiskConfig, RiskConfigError};
 pub use summary::{Concentration, PortfolioTotals, RiskSummary, UnderlyingRisk};
+pub use var::{VarCalculator, VarMethod, VarMethodReport, VarReport};

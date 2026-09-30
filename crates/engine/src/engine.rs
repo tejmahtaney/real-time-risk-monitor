@@ -12,7 +12,10 @@ use chrono::Utc;
 use domain::{Clock, ClockStep, MarketState, Position, SimClock, StepKind, Symbol, market_date};
 use marketdata::{PriceFeed, SeedData};
 use portfolio::{PortfolioError, PositionBook, PositionSpec, resolve, to_spec};
-use risk::{AlertEvent, LimitMonitor, LimitStatus, LimitsConfig, PnlAttributor, aggregate};
+use risk::{
+    AlertEvent, LimitMonitor, LimitStatus, LimitsConfig, PnlAttributor, VarCalculator, VarMethod,
+    aggregate,
+};
 use storage::StorageRoot;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{Instant as TokioInstant, MissedTickBehavior};
@@ -41,6 +44,10 @@ pub struct Engine<F: PriceFeed> {
     book: PositionBook,
     attributor: PnlAttributor,
     monitor: LimitMonitor,
+    /// Value at Risk (Part 18): the session's calibrated correlation/return data, the
+    /// delta-gamma Monte Carlo's cached common random numbers, and the adaptive compute
+    /// budget.
+    var_calculator: VarCalculator,
     /// Each symbol's spot at the start of the current session, for `change_since_open`.
     open_spots: BTreeMap<Symbol, f64>,
     seq: u64,
@@ -78,6 +85,9 @@ impl<F: PriceFeed> Engine<F> {
     /// bounds the history ring buffer (see [`Self::history_since`]); `0` disables it.
     /// `rng_seed` is `config/simulation.toml`'s RNG seed — a different thing from
     /// `seed: &SeedData`, the calibrated *market* seed above — recorded in `meta.json`.
+    /// `headline_var_method` is `config/risk.toml`'s `headline_var_method` (Part 18):
+    /// which of the three `VaR` methods' `VaR99` backs the headline figure, `HistoryPoint`
+    /// and the `var_99` limit.
     ///
     /// This constructor performs no I/O: it computes this session's id and metadata
     /// (see [`Self::session_id`]) but does not write them anywhere. [`Self::spawn`]
@@ -89,9 +99,9 @@ impl<F: PriceFeed> Engine<F> {
     /// [`EngineError::Calibration`] if the seed cannot build a market state,
     /// [`EngineError::Portfolio`] if the starting positions cannot be resolved or added
     /// to the book.
-    // Eight constructor parameters is over clippy's default of seven, but every one is
+    // Nine constructor parameters is over clippy's default of seven, but every one is
     // a distinct, already-validated piece of state this type owns; grouping them into
-    // a builder or config struct would only move the same eight names one level down.
+    // a builder or config struct would only move the same nine names one level down.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         clock: SimClock,
@@ -102,6 +112,7 @@ impl<F: PriceFeed> Engine<F> {
         wall_clock: Box<dyn Clock>,
         history_capacity: usize,
         rng_seed: u64,
+        headline_var_method: VarMethod,
     ) -> Result<Self, EngineError> {
         let started = Instant::now();
         let start = clock.now();
@@ -151,8 +162,19 @@ impl<F: PriceFeed> Engine<F> {
         let mut monitor = LimitMonitor::new(limits, wall_clock);
         let rows = book.value_all(&market, start);
         let summary = aggregate(&rows);
-        let _events = monitor.evaluate(&summary, start);
-        let limit_statuses = monitor.statuses(&summary);
+
+        let mut var_calculator = VarCalculator::new(
+            seed.symbols.clone(),
+            seed.correlation.clone(),
+            seed.returns.clone(),
+            seed.return_dates.clone(),
+            headline_var_method,
+        );
+        let var_report = var_calculator.compute(&summary, &market, &book, start);
+        let headline_var_99 = var_report.headline().var_99;
+
+        let _events = monitor.evaluate(&summary, headline_var_99, start);
+        let limit_statuses = monitor.statuses(&summary, headline_var_99);
 
         let open_spots = session_open_spots(&market);
         let pnl = attributor.report();
@@ -178,6 +200,7 @@ impl<F: PriceFeed> Engine<F> {
             clock.is_paused(),
             FeedStatus::Ok,
             compute_micros,
+            var_report,
         );
 
         let mut history = VecDeque::new();
@@ -190,6 +213,7 @@ impl<F: PriceFeed> Engine<F> {
             book,
             attributor,
             monitor,
+            var_calculator,
             open_spots,
             seq: 0,
             last_snapshot: Arc::new(snapshot),
@@ -227,8 +251,8 @@ impl<F: PriceFeed> Engine<F> {
     }
 
     /// One full cycle: advance the clock, step the feed, settle expiries, value
-    /// positions, aggregate, attribute P&L, evaluate limits, build and publish a
-    /// snapshot.
+    /// positions, attribute P&L, aggregate, compute `VaR` (Part 18), evaluate limits,
+    /// build and publish a snapshot.
     ///
     /// A feed failure means stale prices, not stopped time: if `feed.step` or applying
     /// its tick to the market fails, both are documented to leave their state unchanged,
@@ -286,13 +310,19 @@ impl<F: PriceFeed> Engine<F> {
         let rows = self.book.value_all(&self.market, step.to);
         self.attributor.on_tick(&rows, &step);
         let summary = aggregate(&rows);
-        let events = self.monitor.evaluate(&summary, step.to);
+
+        let var_report = self
+            .var_calculator
+            .compute(&summary, &self.market, &self.book, step.to);
+        let headline_var_99 = var_report.headline().var_99;
+
+        let events = self.monitor.evaluate(&summary, headline_var_99, step.to);
         for event in &events {
             self.pending_records
                 .push(RecorderRecord::Event(SessionEvent::Alert(event.clone())));
         }
         self.new_alerts.extend(events);
-        let limit_statuses = self.monitor.statuses(&summary);
+        let limit_statuses = self.monitor.statuses(&summary, headline_var_99);
 
         self.seq += 1;
         let pnl = self.attributor.report();
@@ -318,6 +348,7 @@ impl<F: PriceFeed> Engine<F> {
             self.clock.is_paused(),
             feed_status,
             compute_micros,
+            var_report,
         );
         let point = history_point(&snapshot);
         push_history(&mut self.history, self.history_capacity, point.clone());
@@ -587,6 +618,7 @@ fn build_snapshot(
     paused: bool,
     feed_status: FeedStatus,
     compute_micros: u64,
+    var: risk::VarReport,
 ) -> RiskSnapshot {
     let market_snapshot = market
         .iter()
@@ -620,6 +652,7 @@ fn build_snapshot(
         positions: rows,
         summary,
         pnl,
+        var,
         active_alerts,
         limits,
         alert_history,
@@ -649,7 +682,7 @@ fn history_point(snapshot: &RiskSnapshot) -> HistoryPoint {
         market_value: snapshot.summary.totals.market_value,
         pnl_today: snapshot.pnl.portfolio.today,
         worst_limit_utilisation,
-        var_99: None,
+        var_99: Some(snapshot.var.headline().var_99),
     }
 }
 

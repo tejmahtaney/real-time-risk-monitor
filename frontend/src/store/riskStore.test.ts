@@ -3,7 +3,20 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { AlertEvent } from '../api/generated/AlertEvent'
 import type { HistoryPoint } from '../api/generated/HistoryPoint'
 import type { RiskSnapshot } from '../api/generated/RiskSnapshot'
+import type { VarMethodReport } from '../api/generated/VarMethodReport'
 import { ALERT_CAP, HISTORY_CAP, historyPointFromSnapshot, useRiskStore } from './riskStore'
+
+function varMethodReport(varNinetyNine: number): VarMethodReport {
+  return {
+    var_95: varNinetyNine * 0.8,
+    var_99: varNinetyNine,
+    es_97_5: varNinetyNine * 1.2,
+    scenario_count: 10_000,
+    window_start: null,
+    window_end: null,
+    compute_micros: 50,
+  }
+}
 
 function baseSnapshot(overrides: Partial<RiskSnapshot> = {}): RiskSnapshot {
   return {
@@ -85,6 +98,15 @@ function baseSnapshot(overrides: Partial<RiskSnapshot> = {}): RiskSnapshot {
     paused: false,
     feed_status: 'ok',
     compute_micros: 100,
+    var: {
+      headline_method: 'delta_gamma_mc',
+      delta_normal: varMethodReport(200),
+      delta_gamma_mc: varMethodReport(300),
+      historical: varMethodReport(400),
+      total_compute_micros: 60,
+      freshly_computed: true,
+      recompute_every_ticks: 1,
+    },
     ...overrides,
   }
 }
@@ -127,6 +149,12 @@ describe('applySnapshot', () => {
     useRiskStore.getState().applySnapshot(baseSnapshot({ seq: 1 }))
     useRiskStore.getState().applySnapshot(baseSnapshot({ seq: 1 }))
     expect(useRiskStore.getState().history).toHaveLength(1)
+  })
+
+  it("derives the history point's var_99 from the headline method, not a hardcoded null", () => {
+    useRiskStore.getState().applySnapshot(baseSnapshot())
+    // baseSnapshot's headline_method is delta_gamma_mc, whose var_99 is 300.
+    expect(useRiskStore.getState().history[0]?.var_99).toBe(300)
   })
 })
 

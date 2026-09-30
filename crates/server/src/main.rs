@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use engine::{
     AlphaVantageSource, Archive, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL, Engine, GbmSimulator,
-    HistoryLoader, LimitsConfig, MarketConfig, PositionSpec, SimClock, SimulationConfig,
-    StorageRoot, SystemClock, calibrate, load_csv,
+    HistoryLoader, LimitsConfig, MarketConfig, PositionSpec, RiskConfig, SimClock,
+    SimulationConfig, StorageRoot, SystemClock, calibrate, load_csv,
 };
 use server::{AppState, ServerConfig, StartPortfolio, StorageConfig, build_router};
 use tokio_util::sync::CancellationToken;
@@ -35,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let sim_config = SimulationConfig::load(&config.simulation_config_path)
         .context("loading simulation config")?;
     let limits = LimitsConfig::load(&config.limits_config_path).context("loading limits config")?;
+    let risk_config = RiskConfig::load(&config.risk_config_path).context("loading risk config")?;
     let storage_config = Arc::new(
         StorageConfig::load(&config.storage_config_path).context("loading storage config")?,
     );
@@ -57,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
         Box::new(SystemClock),
         config.history_capacity,
         sim_config.seed,
+        risk_config.headline_var_method,
     )
     .context("building the engine")?;
 
@@ -71,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
             config.market_config_path.as_path(),
             config.simulation_config_path.as_path(),
             config.limits_config_path.as_path(),
+            config.risk_config_path.as_path(),
             config.storage_config_path.as_path(),
             config.portfolio_path.as_path(),
         ],

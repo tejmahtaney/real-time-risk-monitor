@@ -16,14 +16,15 @@ import type { LimitStatus } from '../api/generated/LimitStatus'
  */
 export const LIMIT_WARNING_THRESHOLD = 0.8
 
-/** The four Greeks-over-time charts, by the reporting-unit field they plot. */
-export type GreekMetric = 'dollar_delta' | 'dollar_gamma_1pct' | 'vega' | 'theta'
+/** The five Greeks-over-time charts, by the reporting-unit field they plot. */
+export type GreekMetric = 'dollar_delta' | 'dollar_gamma_1pct' | 'vega' | 'theta' | 'var_99'
 
 const METRIC_LIMIT_KIND: Record<GreekMetric, LimitKind> = {
   dollar_delta: 'portfolio_dollar_delta',
   dollar_gamma_1pct: 'portfolio_dollar_gamma1_pct',
   vega: 'portfolio_vega',
   theta: 'portfolio_theta_floor',
+  var_99: 'portfolio_var99',
 }
 
 /** One side of a chart's bound: the dashed line's value, and where its shaded band
@@ -54,6 +55,10 @@ const NO_BOUNDS: MetricBounds = { upper: null, lower: null }
  * `portfolio_theta_floor` compares `max(0, -theta)` against its limit (see
  * `PortfolioLimits::theta_floor`'s doc comment) — positive theta can never breach
  * it, so only a lower bound (very negative theta) makes sense; `upper` is `null`.
+ *
+ * `portfolio_var99` (Part 18) is the mirror image of theta: VaR is always reported
+ * as a non-negative number (never an absolute value of something that can go either
+ * way), so only an upper bound makes sense; `lower` is `null`.
  */
 export function metricBounds(limits: LimitStatus[], metric: GreekMetric): MetricBounds {
   const status = limits.find(
@@ -62,12 +67,16 @@ export function metricBounds(limits: LimitStatus[], metric: GreekMetric): Metric
   if (!status || !Number.isFinite(status.limit) || status.limit <= 0) return NO_BOUNDS
 
   const warningMagnitude = status.limit * LIMIT_WARNING_THRESHOLD
-  const lower: ChartBound = { limit: -status.limit, warningStart: -warningMagnitude }
+  const upper: ChartBound = { limit: status.limit, warningStart: warningMagnitude }
 
   if (metric === 'theta') {
+    const lower: ChartBound = { limit: -status.limit, warningStart: -warningMagnitude }
     return { upper: null, lower }
   }
-  const upper: ChartBound = { limit: status.limit, warningStart: warningMagnitude }
+  if (metric === 'var_99') {
+    return { upper, lower: null }
+  }
+  const lower: ChartBound = { limit: -status.limit, warningStart: -warningMagnitude }
   return { upper, lower }
 }
 

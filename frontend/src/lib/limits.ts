@@ -36,6 +36,7 @@ const KIND_LABEL: Record<LimitKind, string> = {
   gross_exposure: 'Gross exposure',
   concentration: 'Concentration',
   underlying_dollar_delta: 'Underlying $ delta',
+  portfolio_var99: 'Portfolio VaR 99%',
 }
 
 /** A human label for a `LimitKind`. */

@@ -35,6 +35,8 @@ pub struct ServerConfig {
     pub simulation_config_path: PathBuf,
     /// Path to `config/limits.toml`.
     pub limits_config_path: PathBuf,
+    /// Path to `config/risk.toml`.
+    pub risk_config_path: PathBuf,
     /// Path to `config/storage.toml`.
     pub storage_config_path: PathBuf,
     /// Path to the starting portfolio CSV.

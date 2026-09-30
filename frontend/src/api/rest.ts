@@ -22,6 +22,7 @@ import type { SessionEvent } from './generated/SessionEvent'
 import type { SessionSummary } from './generated/SessionSummary'
 import type { StorageUsageResponse } from './generated/StorageUsageResponse'
 import type { SymbolArchive } from './generated/SymbolArchive'
+import type { VarReport } from './generated/VarReport'
 import type { VersionSummary } from './generated/VersionSummary'
 
 /** Re-exported so callers of {@link marketDataArchive} do not need their own import. */
@@ -95,6 +96,7 @@ export const api = {
   greeks: (): Promise<GreeksResponse> => getJson('/api/greeks'),
   riskSummary: (): Promise<RiskSummaryResponse> => getJson('/api/risk-summary'),
   pnl: (): Promise<PnlReport> => getJson('/api/pnl'),
+  varReport: (): Promise<VarReport> => getJson('/api/var'),
   alerts: (): Promise<AlertsResponse> => getJson('/api/alerts'),
 
   control: (request: ControlRequest): Promise<void> => postJson('/api/control', request),

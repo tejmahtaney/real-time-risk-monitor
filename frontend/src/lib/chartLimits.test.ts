@@ -57,6 +57,13 @@ describe('metricBounds', () => {
     ]
     expect(metricBounds(limits, 'vega').upper?.limit).toBe(2_200)
   })
+
+  it('gives var_99 only an upper bound (Part 18): VaR is never a mirrored absolute value', () => {
+    const varLimit = limitStatus({ name: 'portfolio_var99', limit: 32_500 })
+    const bounds = metricBounds([varLimit], 'var_99')
+    expect(bounds.upper).toEqual({ limit: 32_500, warningStart: 26_000 })
+    expect(bounds.lower).toBeNull()
+  })
 })
 
 describe('computeChartScale', () => {
@@ -138,6 +145,18 @@ describe('computeChartScale', () => {
     expect(scale.domain).toEqual([488_000, 605_000])
     expect(scale.visibleBound).toEqual(bounds.upper)
     expect(scale.offscreenLimit).toBeNull()
+  })
+
+  it('the VaR chart axis follows the data, not a limit far above it (Part 18, the same class of bug Part 16 fixed for gamma/vega)', () => {
+    // var_99 history hovering around $20k, with a var_99 limit set far above it
+    // (well past the 1.5x-domain-reach visibility rule) — the axis must track the
+    // data, not stretch out to the limit and flatten the chart.
+    const bounds: MetricBounds = { upper: { limit: 500_000, warningStart: 400_000 }, lower: null }
+    const scale = computeChartScale([18_000, 20_000, 22_000], bounds)
+    // data-only domain: range 4,000, pad 400 -> [17,600, 22,400].
+    expect(scale.domain).toEqual([17_600, 22_400])
+    expect(scale.visibleBound).toBeNull()
+    expect(scale.offscreenLimit).toBe(500_000)
   })
 
   it('is visible exactly at 1.5x the domain reach, and offscreen just past it', () => {

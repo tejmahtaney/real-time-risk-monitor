@@ -41,7 +41,7 @@ describe('GreeksCharts', () => {
     expect(screen.getByText(/waiting for history/i)).toBeInTheDocument()
   })
 
-  it('renders all four metric charts once there is history', () => {
+  it('renders all five metric charts once there is history, including VaR (Part 18)', () => {
     const history = [
       historyPoint({ seq: 1 }),
       historyPoint({ seq: 2, sim_time: new Date('2026-09-29T14:00:30Z').toISOString() }),
@@ -51,6 +51,7 @@ describe('GreeksCharts', () => {
     expect(screen.getByTestId('greek-chart-Dollar gamma 1% ($)')).toBeInTheDocument()
     expect(screen.getByTestId('greek-chart-Vega ($ / vol pt)')).toBeInTheDocument()
     expect(screen.getByTestId('greek-chart-Theta ($ / day)')).toBeInTheDocument()
+    expect(screen.getByTestId('greek-chart-VaR 99% ($)')).toBeInTheDocument()
   })
 
   it('offers a 5m / 15m / all window selector, defaulting to 15m', () => {
@@ -80,5 +81,23 @@ describe('GreeksCharts', () => {
     render(<GreeksCharts history={[historyPoint()]} limits={[]} />)
     const gammaChart = screen.getByTestId('greek-chart-Dollar gamma 1% ($)')
     expect(within(gammaChart).queryByTestId('offscreen-limit')).not.toBeInTheDocument()
+  })
+
+  it("the VaR chart's axis follows the data, not a far-away configured limit (Part 18)", () => {
+    const history = [
+      historyPoint({ seq: 1, var_99: 18_000 }),
+      historyPoint({ seq: 2, sim_time: new Date('2026-09-29T14:00:30Z').toISOString(), var_99: 20_000 }),
+      historyPoint({ seq: 3, sim_time: new Date('2026-09-29T14:01:00Z').toISOString(), var_99: 22_000 }),
+    ]
+    const varLimit = limit({ name: 'portfolio_var99', limit: 500_000, utilisation: 22_000 / 500_000 })
+    render(<GreeksCharts history={history} limits={[varLimit]} />)
+    const varChart = screen.getByTestId('greek-chart-VaR 99% ($)')
+    expect(within(varChart).getByTestId('offscreen-limit')).toHaveTextContent('limit $500.0k')
+  })
+
+  it('skips history points with a null var_99 (a server built before Part 18, or not yet live)', () => {
+    const history = [historyPoint({ seq: 1, var_99: null }), historyPoint({ seq: 2, var_99: 5_000 })]
+    render(<GreeksCharts history={history} limits={[]} />)
+    expect(screen.getByTestId('greek-chart-VaR 99% ($)')).toBeInTheDocument()
   })
 })

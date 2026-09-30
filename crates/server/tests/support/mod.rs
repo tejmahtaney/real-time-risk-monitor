@@ -22,7 +22,7 @@ use axum::http::Request;
 use chrono::{TimeZone, Utc};
 use engine::{
     DataSource, Engine, FixedClock, GbmSimulator, InstrumentKind, LimitsConfig, PositionId,
-    PositionSpec, SeedData, SimClock, SimulationConfig, StorageRoot, Symbol, SymbolSeed,
+    PositionSpec, SeedData, SimClock, SimulationConfig, StorageRoot, Symbol, SymbolSeed, VarMethod,
     VolProcessConfig,
 };
 use serde_json::Value;
@@ -109,6 +109,7 @@ pub fn server_config() -> ServerConfig {
         market_config_path: repo_root().join("config/market.toml"),
         simulation_config_path: repo_root().join("config/simulation.toml"),
         limits_config_path: repo_root().join("config/limits.toml"),
+        risk_config_path: repo_root().join("config/risk.toml"),
         storage_config_path: repo_root().join("config/storage.toml"),
         portfolio_path: repo_root().join("data/sample_portfolio.csv"),
         history_capacity: 2_400,
@@ -174,6 +175,7 @@ pub fn test_router_with_config(
         Box::new(FixedClock::new(start())),
         2_400,
         RNG_SEED,
+        VarMethod::DeltaGammaMc,
     )
     .unwrap();
     let (dir, storage_root) = temp_storage();

@@ -50,7 +50,9 @@ pnl_today: PnlBuckets,
  */
 worst_limit_utilisation: number, 
 /**
- * Reserved for Part 18's `VaR` history; always `None` until then. Mirrors
- * `risk::LimitsConfig::var_99`'s type.
+ * The headline `VaR` method's `VaR99` at this tick (Part 18) — see
+ * [`risk::VarReport::headline`] and `config/risk.toml`'s `headline_var_method`.
+ * `Some` on every tick; `Option` only because `risk::LimitsConfig::var_99` (the
+ * limit this is compared against) is itself optional.
  */
 var_99: number | null, };

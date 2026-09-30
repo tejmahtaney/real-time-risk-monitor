@@ -14,8 +14,14 @@ warning_clear_threshold = 0.75
 # value that hovers around the breach line does not flap in and out of Breach.
 clear_threshold = 0.95
 
-# 99 % one-day Value at Risk. Parsed but not evaluated until Part 18.
-var_99 = 2000000
+# 99 % one-day Value at Risk (headline method, config/risk.toml's headline_var_method).
+# Evaluated from Part 18 onwards. `tune_limits` (rerun with a real VarCalculator, not a
+# placeholder) measured the headline VaR99 across 10 seed-42 sessions at min 5,886, p50
+# 15,163, p90 21,236, p99 24,475, max 24,986. Set to about 30 % above that observed peak:
+# a reserved ceiling in the same spirit as dollar_gamma_1pct, vega and gross_exposure
+# (quiet on this sample book, a real limit for a bigger move), not a demo trigger like
+# dollar_delta or the TSLA override below.
+var_99 = 32500
 
 [portfolio]
 # Directional exposure: the dollar P&L of a 1 % move in every underlying together. The

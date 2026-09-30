@@ -16,7 +16,10 @@ use marketdata::{
     SimulationConfig, SystemClock, calibrate,
 };
 use portfolio::{PositionBook, load_csv, resolve};
-use risk::{AlertEvent, LimitKind, LimitMonitor, LimitState, LimitsConfig, RiskSummary, aggregate};
+use risk::{
+    AlertEvent, LimitKind, LimitMonitor, LimitState, LimitsConfig, RiskConfig, RiskSummary,
+    VarCalculator, aggregate,
+};
 use storage::StorageRoot;
 
 /// How many sessions to run.
@@ -196,11 +199,15 @@ struct Measures {
     theta_decay: Series,
     gross_exposure: Series,
     concentration: Series,
+    /// The headline `VaR` method's `VaR99` (Part 18), recorded from a real `VarCalculator`
+    /// run alongside every other measure — not a placeholder — so `var_99` in
+    /// `config/limits.toml` can be tuned the same way every other limit already is.
+    var_99: Series,
     underlying_dollar_delta: BTreeMap<Symbol, Series>,
 }
 
 impl Measures {
-    fn record(&mut self, session: usize, summary: &RiskSummary) {
+    fn record(&mut self, session: usize, summary: &RiskSummary, headline_var_99: f64) {
         self.dollar_delta
             .push(session, summary.totals.dollar_delta.abs());
         self.dollar_gamma_1pct
@@ -214,6 +221,7 @@ impl Measures {
             session,
             summary.concentration.first().map_or(0.0, |c| c.fraction),
         );
+        self.var_99.push(session, headline_var_99);
         for (symbol, risk) in &summary.by_underlying {
             self.underlying_dollar_delta
                 .entry(symbol.clone())
@@ -232,6 +240,7 @@ impl Measures {
         self.gross_exposure.print("gross exposure");
         self.concentration
             .print_fraction("largest concentration share");
+        self.var_99.print("headline VaR99 (Part 18)");
         for (symbol, series) in &self.underlying_dollar_delta {
             series.print(&format!("{symbol} |dollar delta|"));
         }
@@ -288,6 +297,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let market = MarketConfig::load(Path::new("config/market.toml"))?;
     let sim_config = SimulationConfig::load(Path::new("config/simulation.toml"))?;
     let limits = LimitsConfig::load(Path::new("config/limits.toml"))?;
+    let risk_config = RiskConfig::load(Path::new("config/risk.toml"))?;
     let (wc, w, c) = (
         limits.warning_clear_threshold,
         limits.warning_threshold,
@@ -316,6 +326,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut book = PositionBook::from_positions(positions)?;
 
     let mut monitor = LimitMonitor::new(limits, Box::new(FixedClock::new(start)));
+    let mut var_calculator = VarCalculator::new(
+        seed.symbols.clone(),
+        seed.correlation.clone(),
+        seed.returns.clone(),
+        seed.return_dates.clone(),
+        risk_config.headline_var_method,
+    );
 
     let mut measures = Measures::default();
     let mut session_counts: Vec<(u32, u32)> = Vec::new();
@@ -332,9 +349,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         book.settle_expired(step.to, &market_state);
         let rows = book.value_all(&market_state, step.to);
         let summary = aggregate(&rows);
-        measures.record(session, &summary);
+        let var_report = var_calculator.compute(&summary, &market_state, &book, step.to);
+        let headline_var_99 = var_report.headline().var_99;
+        measures.record(session, &summary, headline_var_99);
 
-        let events = monitor.evaluate(&summary, step.to);
+        let events = monitor.evaluate(&summary, headline_var_99, step.to);
         for event in &events {
             *alerts_by_kind.entry(event.name).or_default() += 1;
             if is_enter(event) {

@@ -14,6 +14,7 @@ import type { HistoryPoint } from '../api/generated/HistoryPoint'
 import type { PositionRisk } from '../api/generated/PositionRisk'
 import type { RiskSnapshot } from '../api/generated/RiskSnapshot'
 import type { RiskSummaryResponse } from '../api/generated/RiskSummaryResponse'
+import { headlineVar99 } from '../lib/var'
 
 /** How the live data client currently sees the backend. */
 export type ConnectionStatus = 'connecting' | 'open' | 'polling' | 'closed'
@@ -69,7 +70,7 @@ export function historyPointFromSnapshot(snapshot: RiskSnapshot): HistoryPoint {
     market_value: snapshot.summary.totals.market_value,
     pnl_today: snapshot.pnl.portfolio.today,
     worst_limit_utilisation: worstLimitUtilisation,
-    var_99: null,
+    var_99: headlineVar99(snapshot.var),
   }
 }
 

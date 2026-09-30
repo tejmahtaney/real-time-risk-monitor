@@ -66,6 +66,32 @@ async fn greeks_and_risk_summary_and_pnl_and_alerts_respond() {
 }
 
 #[tokio::test]
+async fn var_report_responds_with_sane_numbers() {
+    let (router, _dir) = test_router();
+    let response = router.oneshot(get("/api/var")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+
+    assert!(body["headline_method"].is_string());
+    for method in ["delta_normal", "delta_gamma_mc", "historical"] {
+        let report = &body[method];
+        let var_95 = report["var_95"].as_f64().unwrap();
+        let var_99 = report["var_99"].as_f64().unwrap();
+        let es_97_5 = report["es_97_5"].as_f64().unwrap();
+        assert!(
+            var_95 <= var_99,
+            "{method}: var_95 {var_95} > var_99 {var_99}"
+        );
+        assert!(
+            es_97_5 >= var_99,
+            "{method}: es_97_5 {es_97_5} < var_99 {var_99}"
+        );
+        assert!(report["compute_micros"].is_number());
+    }
+    assert!(body["recompute_every_ticks"].as_u64().unwrap() >= 1);
+}
+
+#[tokio::test]
 async fn history_returns_points() {
     let (router, _dir) = test_router();
 

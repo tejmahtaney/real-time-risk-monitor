@@ -33,6 +33,7 @@ const METRICS: Array<{ key: GreekMetric; title: string }> = [
   { key: 'dollar_gamma_1pct', title: 'Dollar gamma 1% ($)' },
   { key: 'vega', title: 'Vega ($ / vol pt)' },
   { key: 'theta', title: 'Theta ($ / day)' },
+  { key: 'var_99', title: 'VaR 99% ($)' },
 ]
 
 function axisTickLabel(t: number): string {
@@ -112,13 +113,13 @@ function GreekMiniChart({
   )
 }
 
-/** Four small line charts (dollar delta, dollar gamma 1%, vega, theta), sharing one
- * time axis via `syncId` so hovering one crosshairs all four. `history` is expected
- * to come from `Dashboard`'s `useThrottledHistory`, so a fast tick rate cannot
- * redraw these more than twice a second; each metric's array is then derived with
- * `useMemo` so an unrelated re-render does not recompute four data arrays. Reads
- * only its props, never the store directly (see `PositionsTable`'s doc comment for
- * why). */
+/** Five small line charts (dollar delta, dollar gamma 1%, vega, theta, headline
+ * VaR99 — Part 18), sharing one time axis via `syncId` so hovering one crosshairs
+ * all five. `history` is expected to come from `Dashboard`'s `useThrottledHistory`,
+ * so a fast tick rate cannot redraw these more than twice a second; each metric's
+ * array is then derived with `useMemo` so an unrelated re-render does not
+ * recompute five data arrays. Reads only its props, never the store directly (see
+ * `PositionsTable`'s doc comment for why). */
 export function GreeksCharts({
   history,
   limits,
@@ -138,6 +139,7 @@ export function GreeksCharts({
       dollar_gamma_1pct: [],
       vega: [],
       theta: [],
+      var_99: [],
     }
     for (const point of windowed) {
       const t = Date.parse(point.sim_time)
@@ -146,6 +148,9 @@ export function GreeksCharts({
       byMetric.dollar_gamma_1pct.push({ t, value: point.dollar_gamma_1pct })
       byMetric.vega.push({ t, value: point.vega })
       byMetric.theta.push({ t, value: point.theta })
+      // `var_99` is `null` only on a server built before Part 18 or a not-yet-live
+      // point; skip it rather than plotting a fake zero.
+      if (point.var_99 !== null) byMetric.var_99.push({ t, value: point.var_99 })
     }
     return byMetric
   }, [windowed])

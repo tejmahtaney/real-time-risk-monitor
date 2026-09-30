@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, NaiveDate, Utc};
 use domain::{StepKind, Symbol};
 use portfolio::PositionRisk;
-use risk::{AlertEvent, LimitStatus, PnlBuckets, PnlReport, RiskSummary};
+use risk::{AlertEvent, LimitStatus, PnlBuckets, PnlReport, RiskSummary, VarReport};
 use serde::{Deserialize, Serialize};
 
 /// Whether the feed is producing usable data.
@@ -62,6 +62,11 @@ pub struct RiskSnapshot {
     pub summary: RiskSummary,
     /// Running P&L attribution.
     pub pnl: PnlReport,
+    /// One-day Value at Risk and Expected Shortfall by three methods (Part 18). A
+    /// sibling of `pnl`, not nested inside `summary`, since `VaR` needs market vol,
+    /// correlation and historical return data that `RiskSummary` (a pure function of
+    /// position rows) does not carry.
+    pub var: VarReport,
     /// The limits currently in `Warning` or `Breach`. `risk::LimitMonitor::active()`
     /// only tracks state for limits that have left `Ok` at least once, so this is a
     /// strict subset of [`Self::limits`] — use that field for a limit that's still
@@ -111,7 +116,9 @@ pub struct HistoryPoint {
     /// none are configured. Includes limits still `Ok`, unlike
     /// [`RiskSnapshot::active_alerts`].
     pub worst_limit_utilisation: f64,
-    /// Reserved for Part 18's `VaR` history; always `None` until then. Mirrors
-    /// `risk::LimitsConfig::var_99`'s type.
+    /// The headline `VaR` method's `VaR99` at this tick (Part 18) — see
+    /// [`risk::VarReport::headline`] and `config/risk.toml`'s `headline_var_method`.
+    /// `Some` on every tick; `Option` only because `risk::LimitsConfig::var_99` (the
+    /// limit this is compared against) is itself optional.
     pub var_99: Option<f64>,
 }

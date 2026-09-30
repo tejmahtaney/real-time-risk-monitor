@@ -23,11 +23,11 @@ import { RiskTiles } from './RiskTiles'
  *
  * While the socket is open, live figures come from the latest `RiskSnapshot`.
  * While it is down, positions/totals/limits/compute_micros fall back to the
- * polling client's last response (see `src/api/stream.ts`); alerts, today's P&L
- * and the Part 16 charts below (allocation's `by_underlying`, the whole `PnlReport`,
- * and `history`, none of which any polling route carries) have no polling
- * fallback, so they simply hold their last known snapshot value, same as the
- * header (see `Header.tsx`).
+ * polling client's last response (see `src/api/stream.ts`); alerts, today's P&L,
+ * the VaR tile's `VarReport` (Part 18) and the Part 16 charts below (allocation's
+ * `by_underlying`, the whole `PnlReport`, and `history`, none of which any polling
+ * route carries) have no polling fallback, so they simply hold their last known
+ * snapshot value, same as the header (see `Header.tsx`).
  */
 export function Dashboard(): ReactElement {
   const status = useConnectionStatus()
@@ -57,6 +57,7 @@ export function Dashboard(): ReactElement {
         limits={limits}
         pnlToday={snapshot?.pnl.portfolio.today.actual ?? null}
         computeMicros={computeMicros}
+        varReport={snapshot?.var ?? null}
       />
       <AlertsPane
         active={snapshot?.active_alerts ?? []}

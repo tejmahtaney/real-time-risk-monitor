@@ -93,7 +93,13 @@ describe('stream', () => {
 
     latestSocket().triggerMessage({
       type: 'snapshot',
-      snapshot: { seq: 3, summary: { totals: {} }, pnl: { portfolio: { today: {} } }, limits: [] },
+      snapshot: {
+        seq: 3,
+        summary: { totals: {} },
+        pnl: { portfolio: { today: {} } },
+        limits: [],
+        var: { headline_method: 'delta_gamma_mc', delta_gamma_mc: { var_99: 0 } },
+      },
     })
     expect(useRiskStore.getState().snapshot?.seq).toBe(3)
   })
@@ -171,7 +177,13 @@ describe('stream', () => {
     latestSocket().triggerOpen()
     latestSocket().triggerMessage({
       type: 'snapshot',
-      snapshot: { seq: 42, summary: { totals: {} }, pnl: { portfolio: { today: {} } }, limits: [] },
+      snapshot: {
+        seq: 42,
+        summary: { totals: {} },
+        pnl: { portfolio: { today: {} } },
+        limits: [],
+        var: { headline_method: 'delta_gamma_mc', delta_gamma_mc: { var_99: 0 } },
+      },
     })
 
     mockFetchJson({ totals: {}, concentration: [], limits: [], compute_micros: 1 })

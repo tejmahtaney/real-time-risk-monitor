@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use engine::{Engine, EngineCommand, EngineReply, FixedClock, GbmSimulator, SimClock};
+use engine::{Engine, EngineCommand, EngineReply, FixedClock, GbmSimulator, SimClock, VarMethod};
 use tokio_util::sync::CancellationToken;
 
 mod support;
@@ -31,6 +31,7 @@ fn build_engine_with_history_capacity(capacity: usize) -> Engine<GbmSimulator> {
         Box::new(FixedClock::new(support::start())),
         capacity,
         support::RNG_SEED,
+        VarMethod::DeltaGammaMc,
     )
     .unwrap()
 }

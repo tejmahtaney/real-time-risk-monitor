@@ -20,7 +20,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use domain::{ClockStep, FixedClock, InstrumentKind, PositionId, SimClock, Symbol};
 use engine::{
     Engine, FeedError, GbmSimulator, LimitsConfig, PositionSpec, PriceFeed, SeedData,
-    SimulationConfig,
+    SimulationConfig, VarMethod,
 };
 use marketdata::{DataSource, MarketTick, SymbolSeed, VolProcessConfig};
 use portfolio::{ExpirySpec, StrikeSpec};
@@ -166,6 +166,7 @@ pub fn build_engine() -> Engine<GbmSimulator> {
         Box::new(FixedClock::new(start())),
         100,
         RNG_SEED,
+        VarMethod::DeltaGammaMc,
     )
     .unwrap()
 }
@@ -188,6 +189,7 @@ pub fn build_failing_engine() -> (Engine<FailingFeed>, Arc<AtomicBool>) {
         Box::new(FixedClock::new(start())),
         100,
         RNG_SEED,
+        VarMethod::DeltaGammaMc,
     )
     .unwrap();
     (engine, fail)

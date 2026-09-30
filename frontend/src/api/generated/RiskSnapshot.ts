@@ -8,6 +8,7 @@ import type { RiskSummary } from "./RiskSummary";
 import type { StepKind } from "./StepKind";
 import type { Symbol } from "./Symbol";
 import type { SymbolSnapshot } from "./SymbolSnapshot";
+import type { VarReport } from "./VarReport";
 
 /**
  * An immutable snapshot of the whole engine's state at one tick, published on the
@@ -53,6 +54,13 @@ summary: RiskSummary,
  * Running P&L attribution.
  */
 pnl: PnlReport, 
+/**
+ * One-day Value at Risk and Expected Shortfall by three methods (Part 18). A
+ * sibling of `pnl`, not nested inside `summary`, since `VaR` needs market vol,
+ * correlation and historical return data that `RiskSummary` (a pure function of
+ * position rows) does not carry.
+ */
+var: VarReport, 
 /**
  * The limits currently in `Warning` or `Breach`. `risk::LimitMonitor::active()`
  * only tracks state for limits that have left `Ok` at least once, so this is a

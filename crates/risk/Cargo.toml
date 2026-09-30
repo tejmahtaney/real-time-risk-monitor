@@ -11,14 +11,22 @@ workspace = true
 [dependencies]
 portfolio = { workspace = true }
 domain = { workspace = true }
+# Part 18: delta-normal VaR calls normal::{pdf, inv_cdf} directly, so pricing is now a
+# real dependency, not just a dev-dependency for building BSM test scenarios.
+pricing = { workspace = true }
 chrono.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+tracing.workspace = true
+# Part 18: deterministic common random numbers for the delta-gamma Monte Carlo VaR
+# (same RNG stack marketdata already pins: ChaCha8 seeded, StandardNormal draws).
+rand.workspace = true
+rand_chacha.workspace = true
+rand_distr.workspace = true
 ts-rs.workspace = true
 
 [dev-dependencies]
 approx.workspace = true
-pricing = { workspace = true }
 proptest.workspace = true
 serde_json.workspace = true

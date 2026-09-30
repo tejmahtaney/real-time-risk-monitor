@@ -31,6 +31,9 @@ pub enum LimitKind {
     Concentration,
     /// One underlying's |dollar delta|.
     UnderlyingDollarDelta,
+    /// The headline method's one-day `VaR99` (Part 18). Evaluated only when
+    /// [`LimitsConfig::var_99`] is configured.
+    PortfolioVar99,
 }
 
 /// The whole portfolio, or one underlying.
@@ -183,10 +186,17 @@ impl LimitMonitor {
     }
 
     /// Evaluates every limit against `summary`, returning the events for limits whose
-    /// state changed on this call. `sim_time` is stamped on each event; the wall time
-    /// comes from this monitor's clock.
-    pub fn evaluate(&mut self, summary: &RiskSummary, sim_time: DateTime<Utc>) -> Vec<AlertEvent> {
-        let statuses = self.build_statuses(summary);
+    /// state changed on this call. `headline_var_99` is the headline `VaR` method's
+    /// current `VaR99` (Part 18), evaluated against [`LimitsConfig::var_99`] when
+    /// configured. `sim_time` is stamped on each event; the wall time comes from this
+    /// monitor's clock.
+    pub fn evaluate(
+        &mut self,
+        summary: &RiskSummary,
+        headline_var_99: f64,
+        sim_time: DateTime<Utc>,
+    ) -> Vec<AlertEvent> {
+        let statuses = self.build_statuses(summary, headline_var_99);
 
         let wall_time = self.clock.now();
         let mut events = Vec::new();
@@ -222,17 +232,18 @@ impl LimitMonitor {
     /// Every configured limit's current status against `summary`, including ones
     /// currently `Ok` — unlike [`Self::active`], which only ever holds non-`Ok`
     /// limits. Read-only: does not affect hysteresis state, `active()` or `history()`
-    /// the way [`Self::evaluate`] does.
-    pub fn statuses(&self, summary: &RiskSummary) -> Vec<LimitStatus> {
-        self.build_statuses(summary)
+    /// the way [`Self::evaluate`] does. `headline_var_99` is as in [`Self::evaluate`].
+    pub fn statuses(&self, summary: &RiskSummary, headline_var_99: f64) -> Vec<LimitStatus> {
+        self.build_statuses(summary, headline_var_99)
     }
 
     /// Builds one [`LimitStatus`] per limit and scope, in a fixed order (the six
-    /// portfolio limits, then each underlying's dollar-delta limit), regardless of
-    /// state. Shared by [`Self::evaluate`] (which also tracks hysteresis, active
-    /// alerts and history from the result) and [`Self::statuses`] (a read-only view
-    /// for callers that just want every current utilisation, such as charting).
-    fn build_statuses(&self, summary: &RiskSummary) -> Vec<LimitStatus> {
+    /// portfolio limits, the headline `VaR99` limit when configured, then each
+    /// underlying's dollar-delta limit), regardless of state. Shared by
+    /// [`Self::evaluate`] (which also tracks hysteresis, active alerts and history
+    /// from the result) and [`Self::statuses`] (a read-only view for callers that just
+    /// want every current utilisation, such as charting).
+    fn build_statuses(&self, summary: &RiskSummary, headline_var_99: f64) -> Vec<LimitStatus> {
         let totals = &summary.totals;
         let mut statuses = vec![
             self.status_for(
@@ -272,6 +283,14 @@ impl LimitMonitor {
                 self.config.portfolio.max_concentration,
             ),
         ];
+        if let Some(limit) = self.config.var_99 {
+            statuses.push(self.status_for(
+                LimitKind::PortfolioVar99,
+                Scope::Portfolio,
+                headline_var_99,
+                limit,
+            ));
+        }
         for (symbol, risk) in &summary.by_underlying {
             let limit = self.config.underlying_dollar_delta.limit_for(symbol);
             statuses.push(self.status_for(
@@ -373,22 +392,22 @@ mod tests {
         let key = |name, scope: &Scope| (name, scope.clone());
         let scope = Scope::Portfolio;
 
-        let events = monitor.evaluate(&summary_with_dollar_delta(50_000.0), now());
+        let events = monitor.evaluate(&summary_with_dollar_delta(50_000.0), 0.0, now());
         assert!(events.is_empty(), "50 % utilisation should stay Ok");
 
-        let events = monitor.evaluate(&summary_with_dollar_delta(85_000.0), now());
+        let events = monitor.evaluate(&summary_with_dollar_delta(85_000.0), 0.0, now());
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].from, LimitState::Ok);
         assert_eq!(events[0].to, LimitState::Warning);
         assert_eq!(events[0].name, LimitKind::PortfolioDollarDelta);
 
-        let events = monitor.evaluate(&summary_with_dollar_delta(120_000.0), now());
+        let events = monitor.evaluate(&summary_with_dollar_delta(120_000.0), 0.0, now());
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].from, LimitState::Warning);
         assert_eq!(events[0].to, LimitState::Breach);
 
         // Drops below the clear threshold in one step, straight past Warning to Ok.
-        let events = monitor.evaluate(&summary_with_dollar_delta(50_000.0), now());
+        let events = monitor.evaluate(&summary_with_dollar_delta(50_000.0), 0.0, now());
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].from, LimitState::Breach);
         assert_eq!(events[0].to, LimitState::Ok);
@@ -405,20 +424,20 @@ mod tests {
         let mut monitor = monitor();
 
         // Establish a baseline Ok state first.
-        let events = monitor.evaluate(&summary_with_dollar_delta(10_000.0), now());
+        let events = monitor.evaluate(&summary_with_dollar_delta(10_000.0), 0.0, now());
         assert!(events.is_empty());
 
         // Cross into breach.
-        let events = monitor.evaluate(&summary_with_dollar_delta(101_000.0), now());
+        let events = monitor.evaluate(&summary_with_dollar_delta(101_000.0), 0.0, now());
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].to, LimitState::Breach);
 
         // Oscillate between 0.97x and 1.01x the limit several times: 0.97 is above the
         // 0.95 clear threshold, so the breach should never clear.
         for _ in 0..5 {
-            let events = monitor.evaluate(&summary_with_dollar_delta(97_000.0), now());
+            let events = monitor.evaluate(&summary_with_dollar_delta(97_000.0), 0.0, now());
             assert!(events.is_empty(), "0.97x should not clear the breach");
-            let events = monitor.evaluate(&summary_with_dollar_delta(101_000.0), now());
+            let events = monitor.evaluate(&summary_with_dollar_delta(101_000.0), 0.0, now());
             assert!(events.is_empty(), "already in breach, no new event");
         }
 
@@ -434,20 +453,20 @@ mod tests {
         let mut monitor = monitor();
 
         // Establish a baseline Ok state first.
-        let events = monitor.evaluate(&summary_with_dollar_delta(10_000.0), now());
+        let events = monitor.evaluate(&summary_with_dollar_delta(10_000.0), 0.0, now());
         assert!(events.is_empty());
 
         // Cross into warning.
-        let events = monitor.evaluate(&summary_with_dollar_delta(82_000.0), now());
+        let events = monitor.evaluate(&summary_with_dollar_delta(82_000.0), 0.0, now());
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].to, LimitState::Warning);
 
         // Oscillate between 0.77x and 0.82x the limit several times: 0.77 is above the
         // 0.75 warning clear threshold, so the warning should never clear back to Ok.
         for _ in 0..5 {
-            let events = monitor.evaluate(&summary_with_dollar_delta(77_000.0), now());
+            let events = monitor.evaluate(&summary_with_dollar_delta(77_000.0), 0.0, now());
             assert!(events.is_empty(), "0.77x should not clear the warning");
-            let events = monitor.evaluate(&summary_with_dollar_delta(82_000.0), now());
+            let events = monitor.evaluate(&summary_with_dollar_delta(82_000.0), 0.0, now());
             assert!(events.is_empty(), "already in warning, no new event");
         }
 
@@ -461,9 +480,9 @@ mod tests {
     #[test]
     fn no_duplicate_events_when_state_stays_the_same() {
         let mut monitor = monitor();
-        let events = monitor.evaluate(&summary_with_dollar_delta(85_000.0), now());
+        let events = monitor.evaluate(&summary_with_dollar_delta(85_000.0), 0.0, now());
         assert_eq!(events.len(), 1);
-        let events = monitor.evaluate(&summary_with_dollar_delta(86_000.0), now());
+        let events = monitor.evaluate(&summary_with_dollar_delta(86_000.0), 0.0, now());
         assert!(events.is_empty(), "still Warning, no new event");
     }
 
@@ -495,7 +514,7 @@ mod tests {
             expired_positions: 0,
             error_positions: 0,
         };
-        monitor.evaluate(&summary, now());
+        monitor.evaluate(&summary, 0.0, now());
 
         let nvda_status = monitor
             .active()
@@ -517,7 +536,7 @@ mod tests {
         let mut monitor = monitor();
         for i in 0..250 {
             let value = if i % 2 == 0 { 90_000.0 } else { 10_000.0 };
-            monitor.evaluate(&summary_with_dollar_delta(value), now());
+            monitor.evaluate(&summary_with_dollar_delta(value), 0.0, now());
         }
         assert_eq!(monitor.history().count(), 200);
     }
@@ -536,7 +555,7 @@ mod tests {
             expired_positions: 0,
             error_positions: 0,
         };
-        let events = monitor.evaluate(&summary, now());
+        let events = monitor.evaluate(&summary, 0.0, now());
         assert!(
             events.is_empty(),
             "positive theta earns the book money, so it should never breach the floor"
@@ -558,7 +577,7 @@ mod tests {
             expired_positions: 0,
             error_positions: 0,
         };
-        let events = monitor.evaluate(&summary, now());
+        let events = monitor.evaluate(&summary, 0.0, now());
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, LimitKind::Concentration);
         assert_eq!(events[0].to, LimitState::Breach);
@@ -567,7 +586,7 @@ mod tests {
     #[test]
     fn statuses_includes_every_limit_even_ones_still_ok() {
         let monitor = monitor();
-        let statuses = monitor.statuses(&summary_with_dollar_delta(50_000.0));
+        let statuses = monitor.statuses(&summary_with_dollar_delta(50_000.0), 0.0);
         // Six portfolio limits and no underlyings in this summary.
         assert_eq!(statuses.len(), 6);
         assert!(
@@ -584,15 +603,40 @@ mod tests {
     #[test]
     fn statuses_reflects_hysteresis_state_after_evaluate() {
         let mut monitor = monitor();
-        monitor.evaluate(&summary_with_dollar_delta(101_000.0), now());
+        monitor.evaluate(&summary_with_dollar_delta(101_000.0), 0.0, now());
         // Dropping back under the raw breach line does not clear hysteresis, so
         // `statuses` (called after `evaluate`) should still show `Breach`, matching
         // what `active()` shows, not a bare recomputed `value.abs() / limit`.
-        let statuses = monitor.statuses(&summary_with_dollar_delta(97_000.0));
+        let statuses = monitor.statuses(&summary_with_dollar_delta(97_000.0), 0.0);
         let delta = statuses
             .iter()
             .find(|s| s.name == LimitKind::PortfolioDollarDelta)
             .expect("portfolio dollar delta should be present");
         assert_eq!(delta.state, LimitState::Breach);
+    }
+
+    #[test]
+    fn var_99_limit_is_evaluated_when_configured() {
+        let mut cfg = config();
+        cfg.var_99 = Some(100_000.0);
+        let mut monitor = LimitMonitor::new(cfg, Box::new(FixedClock::new(now())));
+
+        // Below the limit (and below the 0.8 warning threshold): no event.
+        let events = monitor.evaluate(&summary_with_dollar_delta(0.0), 50_000.0, now());
+        assert!(events.is_empty());
+
+        // Above the limit: a breach event, scoped to the whole portfolio.
+        let events = monitor.evaluate(&summary_with_dollar_delta(0.0), 120_000.0, now());
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].name, LimitKind::PortfolioVar99);
+        assert_eq!(events[0].scope, Scope::Portfolio);
+        assert_eq!(events[0].to, LimitState::Breach);
+    }
+
+    #[test]
+    fn var_99_limit_is_absent_from_statuses_when_not_configured() {
+        let monitor = monitor();
+        let statuses = monitor.statuses(&summary_with_dollar_delta(0.0), 1_000_000.0);
+        assert!(!statuses.iter().any(|s| s.name == LimitKind::PortfolioVar99));
     }
 }

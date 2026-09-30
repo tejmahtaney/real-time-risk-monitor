@@ -11,7 +11,7 @@ use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use engine::{
     AlertEvent, Concentration, EngineCommand, EngineReply, HistoryPoint, LimitStatus, PnlReport,
-    PortfolioTotals, PositionId, PositionRisk, PositionSpec, UnderlyingRisk,
+    PortfolioTotals, PositionId, PositionRisk, PositionSpec, UnderlyingRisk, VarReport,
 };
 use serde::{Deserialize, Serialize};
 use tower::ServiceBuilder;
@@ -56,6 +56,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/greeks", get(greeks))
         .route("/api/risk-summary", get(risk_summary))
         .route("/api/pnl", get(pnl))
+        .route("/api/var", get(var))
         .route("/api/alerts", get(alerts))
         .route("/api/control", post(control))
         .route("/api/history", get(history))
@@ -176,6 +177,12 @@ async fn risk_summary(State(state): State<AppState>) -> Json<RiskSummaryResponse
 
 async fn pnl(State(state): State<AppState>) -> Json<PnlReport> {
     Json(state.engine.latest().pnl.clone())
+}
+
+/// `GET /api/var`: one-day Value at Risk and Expected Shortfall by all three methods
+/// (Part 18), plus which one is the headline.
+async fn var(State(state): State<AppState>) -> Json<VarReport> {
+    Json(state.engine.latest().var)
 }
 
 /// `GET /api/alerts` response body.

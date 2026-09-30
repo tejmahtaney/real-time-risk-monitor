@@ -471,6 +471,7 @@ mod tests {
             market: BTreeMap::new(),
             positions: Vec::new(),
             summary: RiskSummary::default(),
+            var: engine::VarReport::default(),
             pnl: PnlReport {
                 session_date: date,
                 portfolio: PnlLevel::default(),

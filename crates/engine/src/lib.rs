@@ -37,8 +37,9 @@ pub use portfolio::{
 };
 pub use risk::{
     AlertEvent, Concentration, LimitKind, LimitState, LimitStatus, LimitsConfig, LimitsConfigError,
-    PnlBuckets, PnlLevel, PnlReport, PortfolioLimits, PortfolioTotals, RiskSummary, Scope,
-    UnderlyingDeltaLimit, UnderlyingRisk,
+    PnlBuckets, PnlLevel, PnlReport, PortfolioLimits, PortfolioTotals, RiskConfig, RiskConfigError,
+    RiskSummary, Scope, UnderlyingDeltaLimit, UnderlyingRisk, VarCalculator, VarMethod,
+    VarMethodReport, VarReport,
 };
 pub use storage::{
     StorageError, StorageRoot, append_jsonl, check_part, list, list_dirs, read_json, read_jsonl,
