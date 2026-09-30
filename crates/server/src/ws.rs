@@ -486,6 +486,7 @@ mod tests {
             paused: false,
             feed_status: FeedStatus::Ok,
             compute_micros: 123,
+            corporate_actions: Vec::new(),
         }
     }
 

@@ -208,6 +208,18 @@ impl MarketState {
         due
     }
 
+    /// Removes and returns one pending dividend of `symbol` going ex on exactly `ex_date`,
+    /// or `None` when there is none. Two dividends on the same date are taken one at a time.
+    pub fn take_dividend_on(
+        &mut self,
+        symbol: &Symbol,
+        ex_date: NaiveDate,
+    ) -> Option<CashDividend> {
+        let schedule = self.dividends.get_mut(symbol)?;
+        let index = schedule.iter().position(|d| d.ex_date == ex_date)?;
+        Some(schedule.remove(index))
+    }
+
     /// Divides every pending dividend of `symbol` by a split `ratio`, since a share of a
     /// 4-for-1 split pays a quarter of the old dividend.
     pub fn divide_dividends(&mut self, symbol: &Symbol, ratio: f64) {
@@ -492,6 +504,28 @@ mod tests {
                 .with_discrete_dividends([(sym("SPY"), vec![bad])])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn take_dividend_on_removes_one_matching_entry() {
+        let d = |day, amount| CashDividend {
+            ex_date: NaiveDate::from_ymd_opt(2026, 11, day).unwrap(),
+            amount,
+        };
+        let mut m = MarketState::new(
+            t(),
+            0.04,
+            [(sym("SPY"), UnderlyingState::new(600.0, 0.16, 0.0).unwrap())],
+        )
+        .unwrap()
+        .with_discrete_dividends([(sym("SPY"), vec![d(1, 1.0), d(1, 2.0), d(9, 3.0)])])
+        .unwrap();
+        let day = d(1, 0.0).ex_date;
+        assert_relative_eq!(m.take_dividend_on(&sym("SPY"), day).unwrap().amount, 1.0);
+        assert_relative_eq!(m.take_dividend_on(&sym("SPY"), day).unwrap().amount, 2.0);
+        assert!(m.take_dividend_on(&sym("SPY"), day).is_none());
+        assert!(m.take_dividend_on(&sym("AAPL"), day).is_none());
+        assert_eq!(m.dividends(&sym("SPY")).unwrap().len(), 1);
     }
 
     #[test]

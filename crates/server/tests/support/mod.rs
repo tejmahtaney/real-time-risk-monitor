@@ -116,6 +116,7 @@ pub fn server_config() -> ServerConfig {
         risk_config_path: repo_root().join("config/risk.toml"),
         storage_config_path: repo_root().join("config/storage.toml"),
         portfolio_path: repo_root().join("data/sample_portfolio.csv"),
+        corporate_actions_path: repo_root().join("config/corporate_actions.toml"),
         history_capacity: 2_400,
     }
 }

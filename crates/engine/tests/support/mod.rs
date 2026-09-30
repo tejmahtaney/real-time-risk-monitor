@@ -228,4 +228,12 @@ impl PriceFeed for FailingFeed {
         }
         self.inner.step(step)
     }
+
+    fn adjust_spot(
+        &mut self,
+        symbol: &Symbol,
+        adjustment: domain::SpotAdjustment,
+    ) -> Result<(), FeedError> {
+        self.inner.adjust_spot(symbol, adjustment)
+    }
 }

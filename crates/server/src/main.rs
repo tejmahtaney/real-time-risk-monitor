@@ -6,9 +6,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use engine::{
-    AlphaVantageSource, Archive, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL, Engine, GbmSimulator,
+    AlphaVantageSource, Archive, CorporateActionCalendar, CorporateActionState,
+    CorporateActionsConfig, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL, Engine, GbmSimulator,
     HistoryLoader, LimitsConfig, MarketConfig, PositionSpec, RiskConfig, SimClock,
-    SimulationConfig, StorageRoot, SystemClock, calibrate, load_csv,
+    SimulationConfig, StorageRoot, SystemClock, apply_ledger_to_seed, calibrate, load_csv,
+    market_date,
 };
 use server::{AppState, ServerConfig, StartPortfolio, StorageConfig, build_router};
 use tokio_util::sync::CancellationToken;
@@ -41,15 +43,27 @@ async fn main() -> anyhow::Result<()> {
     );
     let storage_root = StorageRoot::at(&config.storage_dir);
 
-    let seed = load_seed(&market, &storage_root).await?;
+    let mut seed = load_seed(&market, &storage_root).await?;
 
     let start = sim_config.start_time(&seed);
+    // Corporate actions come before the simulator and engine are built: the ledger is replayed
+    // into the seed, so the market and the simulator start in the terms of the restored book.
+    let actions = prepare_corporate_actions(
+        &config,
+        &market,
+        &storage_config,
+        &storage_root,
+        &mut seed,
+        start,
+    )
+    .await
+    .context("preparing corporate actions")?;
     let clock = SimClock::new(start, sim_config.speed).context("building the simulated clock")?;
     let feed = GbmSimulator::new(&seed, &sim_config).context("building the price simulator")?;
     let specs = starting_specs(&config, &storage_config, &storage_root)
         .context("loading the starting portfolio")?;
 
-    let engine = Engine::new(
+    let engine = Engine::new_with_actions(
         clock,
         &seed,
         feed,
@@ -59,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
         config.history_capacity,
         sim_config.seed,
         risk_config.headline_var_method,
+        actions,
     )
     .context("building the engine")?;
 
@@ -69,14 +84,7 @@ async fn main() -> anyhow::Result<()> {
     engine::copy_session_config(
         &storage_root,
         engine.session_id(),
-        &[
-            config.market_config_path.as_path(),
-            config.simulation_config_path.as_path(),
-            config.limits_config_path.as_path(),
-            config.risk_config_path.as_path(),
-            config.storage_config_path.as_path(),
-            config.portfolio_path.as_path(),
-        ],
+        &session_config_paths(&config),
     )
     .context("copying this session's config files")?;
     save_session_start_version(&storage_root, &engine.active_specs())
@@ -187,6 +195,95 @@ async fn load_seed(
         .await
         .context("loading market history")?;
     calibrate(&histories, market).context("calibrating seed")
+}
+
+/// The config files copied into each session's folder, so it is self-contained.
+fn session_config_paths(config: &ServerConfig) -> Vec<&std::path::Path> {
+    vec![
+        config.market_config_path.as_path(),
+        config.simulation_config_path.as_path(),
+        config.limits_config_path.as_path(),
+        config.risk_config_path.as_path(),
+        config.storage_config_path.as_path(),
+        config.portfolio_path.as_path(),
+        config.corporate_actions_path.as_path(),
+    ]
+}
+
+/// Loads the corporate-action calendar and the ledger, and puts the seed in the terms of the
+/// book the session will start from.
+///
+/// The ledger is what has been applied to the persisted book. A `last` start (and a saved
+/// version) reads it and replays it into `seed`: spots are divided by each split ratio and cut
+/// by each dividend, and dividend amounts still to come are divided by the splits before them.
+/// The calendar drops what the ledger already holds, so nothing fires twice. A `sample` start
+/// ignores the ledger, because the sample book is unadjusted, and sets it aside under a
+/// timestamped name (renamed, never deleted).
+///
+/// The optional Alpha Vantage loader adds real declared dividends for the symbols on the
+/// discrete model, one request each, only when `[alpha_vantage] enabled = true`.
+async fn prepare_corporate_actions(
+    config: &ServerConfig,
+    market: &MarketConfig,
+    storage_config: &StorageConfig,
+    storage_root: &StorageRoot,
+    seed: &mut engine::SeedData,
+    start: chrono::DateTime<chrono::Utc>,
+) -> anyhow::Result<CorporateActionState> {
+    let actions_config = CorporateActionsConfig::load(&config.corporate_actions_path)
+        .context("loading the corporate actions config")?;
+    let start_date = market_date(start);
+    let mut calendar = CorporateActionCalendar::resolve(&actions_config, start_date)?;
+    let discrete = market.discrete_symbols();
+
+    if actions_config.alpha_vantage.enabled && !discrete.is_empty() {
+        let key = std::env::var("ALPHA_VANTAGE_API_KEY")
+            .ok()
+            .filter(|key| !key.is_empty());
+        if let Some(key) = key {
+            let source = AlphaVantageSource::new(key, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL)
+                .context("building the Alpha Vantage client")?;
+            let found = engine::load_upcoming_dividends(
+                &source,
+                storage_root,
+                &discrete,
+                start_date,
+                chrono::Utc::now(),
+            )
+            .await;
+            tracing::info!(
+                count = found.len(),
+                "loaded upcoming real dividends from Alpha Vantage"
+            );
+            calendar.merge(found);
+        } else {
+            tracing::warn!(
+                "corporate_actions.toml enables Alpha Vantage but ALPHA_VANTAGE_API_KEY is not set"
+            );
+        }
+    }
+    calendar.validate_against(market)?;
+
+    let ledger = if storage_config.start_portfolio == StartPortfolio::Sample {
+        if let Some(moved) = engine::archive_ledger(storage_root, chrono::Utc::now())
+            .context("setting the old applied-actions ledger aside")?
+        {
+            tracing::info!(path = %moved.display(), "sample start: the applied-actions ledger was set aside");
+        }
+        Vec::new()
+    } else {
+        engine::read_ledger(storage_root).context("reading the applied-actions ledger")?
+    };
+    if !ledger.is_empty() {
+        tracing::info!(
+            applied = ledger.len(),
+            "replaying the applied-actions ledger into the seed"
+        );
+    }
+    apply_ledger_to_seed(seed, &ledger)?;
+    calendar.without_applied(&ledger);
+    seed.dividend_schedule = calendar.dividend_schedule(&discrete, &ledger);
+    Ok(CorporateActionState { calendar, ledger })
 }
 
 /// Resolves the starting portfolio specs per `storage_config.start_portfolio`.

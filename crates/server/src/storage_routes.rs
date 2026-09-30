@@ -242,6 +242,7 @@ fn event_type_tag(event: &SessionEvent) -> &'static str {
         SessionEvent::Settlement(_) => "settlement",
         SessionEvent::PositionChange { .. } => "position_change",
         SessionEvent::PortfolioLoad { .. } => "portfolio_load",
+        SessionEvent::CorporateAction(_) => "corporate_action",
         SessionEvent::Control { .. } => "control",
     }
 }
@@ -466,12 +467,30 @@ mod tests {
 
     #[test]
     fn event_type_tags_match_the_wire_shape() {
-        let event = SessionEvent::Control {
-            wall_time: Utc.with_ymd_and_hms(2026, 9, 28, 14, 30, 0).unwrap(),
-            sim_time: Utc.with_ymd_and_hms(2026, 9, 28, 14, 30, 0).unwrap(),
+        let when = Utc.with_ymd_and_hms(2026, 9, 28, 14, 30, 0).unwrap();
+        let control = SessionEvent::Control {
+            wall_time: when,
+            sim_time: when,
             action: engine::ControlAction::Pause,
         };
-        let value = serde_json::to_value(&event).unwrap();
-        assert_eq!(value["type"], event_type_tag(&event));
+        let corporate = SessionEvent::CorporateAction(engine::CorporateActionEvent {
+            id: "split".to_owned(),
+            wall_time: when,
+            sim_time: when,
+            action: engine::CorporateAction::split(
+                engine::Symbol::new("AAPL").unwrap(),
+                4.0,
+                when.date_naive(),
+            )
+            .unwrap(),
+            outcome: engine::CorporateActionOutcome::Applied,
+            message: "AAPL 4-for-1 split: 2 positions adjusted".to_owned(),
+            positions_adjusted: 2,
+            cash_paid: 0.0,
+        });
+        for event in [control, corporate] {
+            let value = serde_json::to_value(&event).unwrap();
+            assert_eq!(value["type"], event_type_tag(&event));
+        }
     }
 }

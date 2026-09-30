@@ -23,6 +23,7 @@ limits_config_path = "config/limits.toml"
 risk_config_path = "config/risk.toml"
 storage_config_path = "config/storage.toml"
 portfolio_path = "data/sample_portfolio.csv"
+corporate_actions_path = "config/corporate_actions.toml"
 
 # Capacity of the engine's history ring buffer (points, not bytes). 2,400 is 10 minutes
 # at the 250 ms tick_interval_ms in config/simulation.toml (4 Hz).

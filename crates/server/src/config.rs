@@ -41,8 +41,15 @@ pub struct ServerConfig {
     pub storage_config_path: PathBuf,
     /// Path to the starting portfolio CSV.
     pub portfolio_path: PathBuf,
+    /// Path to `config/corporate_actions.toml`.
+    #[serde(default = "default_corporate_actions_path")]
+    pub corporate_actions_path: PathBuf,
     /// Capacity of the engine's history ring buffer, in points.
     pub history_capacity: usize,
+}
+
+fn default_corporate_actions_path() -> PathBuf {
+    PathBuf::from("config/corporate_actions.toml")
 }
 
 /// The server configuration could not be loaded.

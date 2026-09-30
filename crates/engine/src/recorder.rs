@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDate, Utc};
-use domain::{Position, PositionId};
+use domain::{AppliedAction, Position, PositionId};
 use portfolio::SettlementEvent;
 use risk::{AlertEvent, PnlBuckets};
 use serde::{Deserialize, Serialize};
@@ -37,11 +37,16 @@ use storage::StorageRoot;
 use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
 
+use crate::corporate::CorporateActionEvent;
 use crate::snapshot::{HistoryPoint, RiskSnapshot};
 
 /// Capacity of the engine-to-recorder channel. The tick loop's `try_send` never waits
 /// on this filling; see this module's doc comment.
 pub(crate) const RECORDER_CHANNEL_CAPACITY: usize = 10_000;
+
+/// The ledger of applied corporate actions, in `portfolios/`. One JSON line per action,
+/// append-only, next to `current.json` because it describes the same book.
+pub const LEDGER_FILE: &str = "applied-actions.jsonl";
 
 /// `sessions/<id>/meta.json`. Written at session start with `end: None`; rewritten in
 /// place at shutdown with `end` set and the final `dropped_records`. A session whose
@@ -125,6 +130,8 @@ pub enum SessionEvent {
         /// How many positions the book holds after the load.
         position_count: usize,
     },
+    /// A corporate action fired, or failed. Information, not a limit.
+    CorporateAction(CorporateActionEvent),
     /// Pause, resume or a speed change.
     Control {
         /// Real-world time of the action.
@@ -154,7 +161,11 @@ pub struct DailyPnlRow {
     pub rho: f64,
     /// The cross and pure-vol-convexity terms, summed over the day.
     pub higher_order: f64,
-    /// `actual` minus the six modelled buckets above, summed over the day.
+    /// Cash dividends received on stock positions, summed over the day. Absent (zero) in
+    /// files written before Part 19.
+    #[serde(default)]
+    pub dividends: f64,
+    /// `actual` minus the modelled buckets above, summed over the day.
     pub residual: f64,
     /// The day's true change in value, from full revaluation.
     pub actual: f64,
@@ -170,6 +181,7 @@ impl DailyPnlRow {
             theta: buckets.theta,
             rho: buckets.rho,
             higher_order: buckets.higher_order,
+            dividends: buckets.dividends,
             residual: buckets.residual,
             actual: buckets.actual,
         }
@@ -197,6 +209,9 @@ pub(crate) enum RecorderRecord {
     },
     /// The book's active (non-settled) positions, rewritten to `portfolios/current.json`.
     CurrentPortfolio(Vec<Position>),
+    /// One applied corporate action, appended to the ledger `portfolios/applied-actions.jsonl`.
+    /// The ledger is what a restart reads to know which splits the book already reflects.
+    AppliedAction(AppliedAction),
 }
 
 /// Runs until `records` closes (every `Sender` dropped, which the tick loop does once
@@ -307,6 +322,15 @@ fn apply_record(
             }
             Err(err) => tracing::error!(error = %err, "cannot reach portfolios/"),
         },
+        RecorderRecord::AppliedAction(applied) => match storage.subdir(&["portfolios"]) {
+            Ok(dir) => {
+                let path = dir.join(LEDGER_FILE);
+                if let Err(err) = storage::append_jsonl(&path, std::slice::from_ref(&applied)) {
+                    tracing::error!(error = %err, "failed to append to the applied-actions ledger");
+                }
+            }
+            Err(err) => tracing::error!(error = %err, "cannot reach portfolios/"),
+        },
     }
 }
 
@@ -350,6 +374,7 @@ fn append_daily_pnl_row(session_dir: &Path, row: DailyPnlRow) -> Result<(), std:
             "theta",
             "rho",
             "higher_order",
+            "dividends",
             "residual",
             "actual",
         ])

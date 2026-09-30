@@ -9,9 +9,14 @@ use std::time::{Duration, Instant};
 use std::sync::atomic::AtomicU64;
 
 use chrono::Utc;
-use domain::{Clock, ClockStep, MarketState, Position, SimClock, StepKind, Symbol, market_date};
-use marketdata::{PriceFeed, SeedData};
-use portfolio::{PortfolioError, PositionBook, PositionSpec, resolve, to_spec};
+use domain::{
+    AppliedAction, Clock, ClockStep, MarketState, Position, SimClock, StepKind, Symbol, market_date,
+};
+use marketdata::{CorporateActionCalendar, PriceFeed, SeedData};
+use portfolio::{
+    PortfolioError, PositionBook, PositionSpec, adjust_specs_for_ledger, ledger_splits, resolve,
+    to_spec,
+};
 use risk::{
     AlertEvent, LimitMonitor, LimitStatus, LimitsConfig, PnlAttributor, VarCalculator, VarMethod,
     aggregate,
@@ -22,6 +27,7 @@ use tokio::time::{Instant as TokioInstant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
 
 use crate::command::{EngineCommand, EngineCommandError, EngineReply, EngineRequest};
+use crate::corporate::{CorporateActionEvent, CorporateActionState, missing_splits};
 use crate::error::EngineError;
 use crate::handle::EngineHandle;
 use crate::recorder::{
@@ -39,10 +45,10 @@ const MAX_SPEED: f64 = 3600.0;
 /// production code instantiates `Engine<marketdata::GbmSimulator>` exactly once.
 pub struct Engine<F: PriceFeed> {
     clock: SimClock,
-    feed: F,
-    market: MarketState,
-    book: PositionBook,
-    attributor: PnlAttributor,
+    pub(crate) feed: F,
+    pub(crate) market: MarketState,
+    pub(crate) book: PositionBook,
+    pub(crate) attributor: PnlAttributor,
     monitor: LimitMonitor,
     /// Value at Risk (Part 18): the session's calibrated correlation/return data, the
     /// delta-gamma Monte Carlo's cached common random numbers, and the adaptive compute
@@ -66,7 +72,13 @@ pub struct Engine<F: PriceFeed> {
     session_meta: SessionMeta,
     /// Records this tick or command produced, drained onto the recorder's channel by
     /// [`Self::spawn`]'s loop after each `tick`/`apply` call.
-    pending_records: Vec<RecorderRecord>,
+    pub(crate) pending_records: Vec<RecorderRecord>,
+    /// Corporate actions still to fire.
+    pub(crate) calendar: CorporateActionCalendar,
+    /// Corporate actions already applied, oldest first. Grows as actions fire.
+    pub(crate) ledger: Vec<AppliedAction>,
+    /// The most recent corporate-action events, carried on every snapshot.
+    pub(crate) corporate_events: VecDeque<CorporateActionEvent>,
 }
 
 impl<F: PriceFeed> Engine<F> {
@@ -114,12 +126,52 @@ impl<F: PriceFeed> Engine<F> {
         rng_seed: u64,
         headline_var_method: VarMethod,
     ) -> Result<Self, EngineError> {
+        Self::new_with_actions(
+            clock,
+            seed,
+            feed,
+            specs,
+            limits,
+            wall_clock,
+            history_capacity,
+            rng_seed,
+            headline_var_method,
+            CorporateActionState::default(),
+        )
+    }
+
+    /// [`Self::new`] with corporate actions (Part 19).
+    ///
+    /// `actions.calendar` is what still has to fire and `actions.ledger` what has already
+    /// been applied. Every position loaded here is first brought up to date with the ledger:
+    /// for each ledgered split on its symbol that the position does not already list in its
+    /// `applied_actions`, the split is applied and its id recorded (see
+    /// [`portfolio::adjust_specs_for_ledger`]). The caller is expected to have replayed the
+    /// same ledger into `seed`, so the market and the book start in the same terms.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::new`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_actions(
+        clock: SimClock,
+        seed: &SeedData,
+        feed: F,
+        specs: &[PositionSpec],
+        limits: LimitsConfig,
+        wall_clock: Box<dyn Clock>,
+        history_capacity: usize,
+        rng_seed: u64,
+        headline_var_method: VarMethod,
+        actions: CorporateActionState,
+    ) -> Result<Self, EngineError> {
         let started = Instant::now();
         let start = clock.now();
         let session_date = market_date(start);
 
         let market = seed.to_market_state(start)?;
-        let positions = resolve(specs, &market, start)?;
+        let specs = adjust_specs_for_ledger(specs.to_vec(), &ledger_splits(&actions.ledger));
+        let positions = resolve(&specs, &market, start)?;
         let mut book = PositionBook::from_positions(positions)?;
         // Settle anything already past its expiry before the very first valuation, so a
         // restored book (e.g. `start_portfolio = "last"` loaded after the server was
@@ -201,6 +253,7 @@ impl<F: PriceFeed> Engine<F> {
             FeedStatus::Ok,
             compute_micros,
             var_report,
+            Vec::new(),
         );
 
         let mut history = VecDeque::new();
@@ -223,6 +276,9 @@ impl<F: PriceFeed> Engine<F> {
             session_id,
             session_meta,
             pending_records: Vec::new(),
+            calendar: actions.calendar,
+            ledger: actions.ledger,
+            corporate_events: VecDeque::new(),
         })
     }
 
@@ -271,6 +327,11 @@ impl<F: PriceFeed> Engine<F> {
     pub fn tick(&mut self, real_elapsed: Duration) -> Result<Arc<RiskSnapshot>, EngineError> {
         let started = Instant::now();
         let step = self.clock.advance(real_elapsed);
+        // The market exactly as the previous tick left it, before this tick's feed step and
+        // before any corporate action. Only an overnight step can open a session with an
+        // action due, so only then is the clone taken. A split rebases the attributor
+        // against this (see `apply_due_actions`).
+        let market_before_tick = (step.kind == StepKind::Overnight).then(|| self.market.clone());
 
         let feed_status = match self.feed.step(&step) {
             Ok(tick) => match tick.apply_to(&mut self.market) {
@@ -292,7 +353,10 @@ impl<F: PriceFeed> Engine<F> {
             }
         };
 
-        if step.kind == StepKind::Overnight {
+        if let Some(previous) = market_before_tick {
+            // Actions apply at the open, before anything below values the book. The open spots
+            // are recorded after them, so a 4-for-1 does not show as a 75 % fall since open.
+            self.apply_due_actions(&step, previous);
             self.open_spots = session_open_spots(&self.market);
         }
 
@@ -349,6 +413,7 @@ impl<F: PriceFeed> Engine<F> {
             feed_status,
             compute_micros,
             var_report,
+            self.corporate_events.iter().cloned().collect(),
         );
         let point = history_point(&snapshot);
         push_history(&mut self.history, self.history_capacity, point.clone());
@@ -401,33 +466,7 @@ impl<F: PriceFeed> Engine<F> {
                 self.push_control(ControlAction::SetSpeed { speed });
                 Ok(EngineReply::Ack)
             }
-            EngineCommand::AddPosition(spec) => {
-                let now = self.clock.now();
-                let resolved = resolve(std::slice::from_ref(&spec), &self.market, now)?;
-                // `resolve` returns exactly one position per spec on success; this
-                // branch cannot happen in practice.
-                let position = resolved.into_iter().next().ok_or_else(|| {
-                    EngineCommandError::Portfolio(PortfolioError::MissingField {
-                        id: spec.id.clone(),
-                        field: "spec",
-                    })
-                })?;
-                self.book.add(position)?;
-                let rows = self.book.value_all(&self.market, now);
-                let row = rows.into_iter().find(|r| r.id == spec.id).ok_or_else(|| {
-                    EngineCommandError::Portfolio(PortfolioError::UnknownPosition(spec.id.clone()))
-                })?;
-                self.pending_records
-                    .push(RecorderRecord::Event(SessionEvent::PositionChange {
-                        wall_time: Utc::now(),
-                        sim_time: now,
-                        kind: PositionChangeKind::Added,
-                        position_id: spec.id.clone(),
-                    }));
-                self.pending_records
-                    .push(RecorderRecord::CurrentPortfolio(self.active_positions()));
-                Ok(EngineReply::Added(Box::new(row)))
-            }
+            EngineCommand::AddPosition(spec) => self.add_position(&spec),
             EngineCommand::RemovePosition(id) => {
                 let removed = self.book.remove(&id)?;
                 self.pending_records
@@ -447,6 +486,10 @@ impl<F: PriceFeed> Engine<F> {
             EngineCommand::GetSpecs => Ok(EngineReply::Specs(self.active_specs())),
             EngineCommand::LoadPortfolio { specs, source } => {
                 let now = self.clock.now();
+                // Bring the loaded book up to date with the splits already applied this run or
+                // restored from the ledger: a version saved before a split comes back adjusted
+                // once, one saved after it comes back unchanged.
+                let specs = adjust_specs_for_ledger(specs, &self.applied_splits());
                 let mut book = PositionBook::from_positions(resolve(&specs, &self.market, now)?)?;
                 let settlements = book.settle_expired(now, &self.market);
                 self.book = book;
@@ -484,6 +527,45 @@ impl<F: PriceFeed> Engine<F> {
                 Ok(EngineReply::Loaded(position_count))
             }
         }
+    }
+
+    /// Resolves and adds one position, stamps it with the ledgered splits, records it.
+    fn add_position(&mut self, spec: &PositionSpec) -> Result<EngineReply, EngineCommandError> {
+        let now = self.clock.now();
+        let resolved = resolve(std::slice::from_ref(spec), &self.market, now)?;
+        // `resolve` returns exactly one position per spec on success; this
+        // branch cannot happen in practice.
+        let mut position = resolved.into_iter().next().ok_or_else(|| {
+            EngineCommandError::Portfolio(PortfolioError::MissingField {
+                id: spec.id.clone(),
+                field: "spec",
+            })
+        })?;
+        // A position added now is written in the market's current, post-split terms:
+        // stamp it with every ledgered split on its symbol so a later reload of the book
+        // does not adjust it again. It is not marked `adjusted`, since nothing was
+        // changed.
+        let splits = self.applied_splits();
+        let symbol = position.instrument.underlying().clone();
+        let stamps: Vec<String> = missing_splits(&splits, &symbol, &position.applied_actions)
+            .map(|s| s.id.clone())
+            .collect();
+        position.applied_actions.extend(stamps);
+        self.book.add(position)?;
+        let rows = self.book.value_all(&self.market, now);
+        let row = rows.into_iter().find(|r| r.id == spec.id).ok_or_else(|| {
+            EngineCommandError::Portfolio(PortfolioError::UnknownPosition(spec.id.clone()))
+        })?;
+        self.pending_records
+            .push(RecorderRecord::Event(SessionEvent::PositionChange {
+                wall_time: Utc::now(),
+                sim_time: now,
+                kind: PositionChangeKind::Added,
+                position_id: spec.id.clone(),
+            }));
+        self.pending_records
+            .push(RecorderRecord::CurrentPortfolio(self.active_positions()));
+        Ok(EngineReply::Added(Box::new(row)))
     }
 
     /// Pushes a [`SessionEvent::Control`] record for the recorder.
@@ -619,6 +701,7 @@ fn build_snapshot(
     feed_status: FeedStatus,
     compute_micros: u64,
     var: risk::VarReport,
+    corporate_actions: Vec<CorporateActionEvent>,
 ) -> RiskSnapshot {
     let market_snapshot = market
         .iter()
@@ -660,6 +743,7 @@ fn build_snapshot(
         paused,
         feed_status,
         compute_micros,
+        corporate_actions,
     }
 }
 

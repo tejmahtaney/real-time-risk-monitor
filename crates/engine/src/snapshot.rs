@@ -8,6 +8,8 @@ use portfolio::PositionRisk;
 use risk::{AlertEvent, LimitStatus, PnlBuckets, PnlReport, RiskSummary, VarReport};
 use serde::{Deserialize, Serialize};
 
+use crate::corporate::CorporateActionEvent;
+
 /// Whether the feed is producing usable data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
@@ -86,6 +88,11 @@ pub struct RiskSnapshot {
     /// Microseconds spent computing this tick, measured with `Instant` around the whole
     /// eight-step cycle.
     pub compute_micros: u64,
+    /// The most recent corporate actions (splits and dividends) to fire, oldest first, up
+    /// to 50. They are information for the alerts pane, not limits. The whole list is
+    /// re-sent with every snapshot, so a client that misses a throttled snapshot still sees
+    /// every event.
+    pub corporate_actions: Vec<CorporateActionEvent>,
 }
 
 /// One tick's worth of portfolio-level risk, kept in the engine's bounded history ring
