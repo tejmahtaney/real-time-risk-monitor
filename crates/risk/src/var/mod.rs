@@ -333,6 +333,30 @@ impl VarCalculator {
         }
     }
 
+    /// Replaces the correlation matrix and the historical return window, for a caller that
+    /// rolls them forward (the backtester). The symbol order is unchanged. The Monte Carlo
+    /// cache holds a Cholesky factor of the old correlation, so it is dropped and rebuilt on the
+    /// next [`compute`](Self::compute).
+    pub fn set_window(
+        &mut self,
+        correlation: Vec<Vec<f64>>,
+        returns: Vec<Vec<f64>>,
+        return_dates: Vec<NaiveDate>,
+    ) {
+        self.correlation = correlation;
+        self.returns = returns;
+        self.return_dates = return_dates;
+        self.mc_cache = None;
+        self.last_report = None;
+    }
+
+    /// Computes every method on every call, never throttling. The adaptive compute budget exists
+    /// to protect the live tick; a backtest has no such deadline and needs a fresh figure per step.
+    pub fn compute_every_tick(&mut self) {
+        self.decided = true;
+        self.recompute_every_ticks = 1;
+    }
+
     /// Computes all three `VaR` methods for this tick, subject to the adaptive compute
     /// budget.
     ///
@@ -905,6 +929,29 @@ mod tests {
         );
         assert!(report.delta_gamma_mc.var_99 > 0.0);
         assert!(report.historical.var_99 > 0.0);
+    }
+
+    #[test]
+    fn set_window_replaces_the_history_and_compute_every_tick_never_skips() {
+        let market = market_with(&[("SPY", 100.0, 0.20)]);
+        let summary = summary_with(&[("SPY", 5_000.0, 0.0)]);
+        let mut calc = calculator(&["SPY"], vec![vec![1.0]], VarMethod::DeltaNormal);
+        calc.compute_every_tick();
+        // Well past the warm-up: every call must be a fresh computation.
+        for _ in 0..(WARM_UP_TICKS * 3) {
+            assert!(
+                calc.compute(&summary, &market, &empty_book(), now())
+                    .freshly_computed
+            );
+        }
+        let before = calc.compute(&summary, &market, &empty_book(), now());
+        assert_eq!(before.historical.scenario_count, 0);
+
+        let dates = vec![NaiveDate::from_ymd_opt(2026, 9, 1).unwrap()];
+        calc.set_window(vec![vec![1.0]], vec![vec![-0.02]], dates.clone());
+        let after = calc.compute(&summary, &market, &empty_book(), now());
+        assert_eq!(after.historical.scenario_count, 1);
+        assert_eq!(after.historical.window_end, dates.last().copied());
     }
 
     // --- Test 5: historical quantiles on a hand-built scenario set ---------------------

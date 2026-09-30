@@ -22,6 +22,7 @@
 
 mod aggregate;
 mod attributor;
+mod backtest;
 mod limits;
 mod monitor;
 mod pnl;
@@ -31,6 +32,10 @@ mod var;
 
 pub use aggregate::aggregate;
 pub use attributor::PnlAttributor;
+pub use backtest::{
+    BacktestSummary, DailyRow, DayPnl, Drawdown, KupiecTest, VAR_EXCEPTION_PROBABILITY,
+    is_exception, kupiec_pof, summarise,
+};
 pub use limits::{LimitsConfig, LimitsConfigError, PortfolioLimits, UnderlyingDeltaLimit};
 pub use monitor::{AlertEvent, LimitKind, LimitMonitor, LimitState, LimitStatus, Scope};
 pub use pnl::{PnlBuckets, PnlLevel, PnlReport, PreviousDay};
