@@ -41,3 +41,12 @@ MSFT = 0.0076
 NVDA = 0.0044
 # TSLA: pays no dividend.
 TSLA = 0.0
+
+# How each symbol's dividends enter option pricing. A symbol not listed uses "yield",
+# the continuous yield above. "discrete" prices its options with the escrowed dividend
+# model (spot less the present value of the dividends before expiry, q = 0) using the
+# cash dividends in config/corporate_actions.toml, and ignores the yield above, so the
+# dividend is never counted twice. Every dividend in that file needs a "discrete" symbol.
+[dividend_model]
+SPY = "discrete"
+MSFT = "discrete"

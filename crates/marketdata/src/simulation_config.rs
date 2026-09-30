@@ -171,6 +171,7 @@ mod tests {
             return_dates: Vec::new(),
             returns: Vec::new(),
             correlation: Vec::new(),
+            dividend_schedule: BTreeMap::new(),
         }
     }
 

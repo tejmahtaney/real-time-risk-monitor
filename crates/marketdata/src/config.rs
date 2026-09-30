@@ -27,6 +27,18 @@ pub enum VolMethod {
     Ewma,
 }
 
+/// How a symbol's dividends enter option pricing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DividendModel {
+    /// The continuous yield q of the `dividend_yields` table.
+    #[default]
+    Yield,
+    /// Discrete cash dividends from the corporate-action calendar, priced with the
+    /// escrowed model. The symbol's continuous yield is ignored and treated as zero.
+    Discrete,
+}
+
 /// The configuration file could not be used.
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -59,8 +71,12 @@ pub struct MarketConfig {
     pub symbols: Vec<Symbol>,
     /// Continuously compounded risk-free rate.
     pub risk_free_rate: f64,
-    /// Continuous dividend yield per symbol.
+    /// Continuous dividend yield per symbol. Required for every symbol, but ignored (as
+    /// zero) for a symbol on the discrete model.
     pub dividend_yields: BTreeMap<Symbol, f64>,
+    /// The dividend model per symbol. A symbol not listed uses [`DividendModel::Yield`].
+    #[serde(default)]
+    pub dividend_model: BTreeMap<Symbol, DividendModel>,
     /// Number of daily returns in the vol and correlation window.
     pub vol_window_days: usize,
     /// Which vol estimate seeds the simulator.
@@ -72,6 +88,20 @@ pub struct MarketConfig {
 }
 
 impl MarketConfig {
+    /// The dividend model of `symbol`: [`DividendModel::Yield`] unless the config says otherwise.
+    pub fn model_of(&self, symbol: &Symbol) -> DividendModel {
+        self.dividend_model.get(symbol).copied().unwrap_or_default()
+    }
+
+    /// The symbols on the discrete dividend model, in config order.
+    pub fn discrete_symbols(&self) -> Vec<Symbol> {
+        self.symbols
+            .iter()
+            .filter(|s| self.model_of(s) == DividendModel::Discrete)
+            .cloned()
+            .collect()
+    }
+
     /// Reads and validates a TOML file.
     ///
     /// # Errors
@@ -121,6 +151,13 @@ impl MarketConfig {
             .find(|s| !self.symbols.contains(s))
         {
             return invalid(format!("dividend yield given for unlisted symbol {extra}"));
+        }
+        if let Some(extra) = self
+            .dividend_model
+            .keys()
+            .find(|s| !self.symbols.contains(s))
+        {
+            return invalid(format!("dividend model given for unlisted symbol {extra}"));
         }
         if !self.risk_free_rate.is_finite() {
             return invalid(format!(
@@ -178,12 +215,25 @@ mod tests {
     }
 
     #[test]
+    fn dividend_models_default_to_the_yield() {
+        let c = MarketConfig::from_toml_str(GOOD).unwrap();
+        assert_eq!(c.model_of(&sym("SPY")), DividendModel::Yield);
+        assert!(c.discrete_symbols().is_empty());
+        let with_model = format!("{GOOD}\n[dividend_model]\nTSLA = \"discrete\"");
+        let c = MarketConfig::from_toml_str(&with_model).unwrap();
+        assert_eq!(c.discrete_symbols(), [sym("TSLA")]);
+        assert_eq!(c.model_of(&sym("SPY")), DividendModel::Yield);
+    }
+
+    #[test]
     fn rejects_broken_configs() {
         let cases = [
             GOOD.replace(r#"["SPY", "TSLA"]"#, "[]"),
             GOOD.replace(r#"["SPY", "TSLA"]"#, r#"["SPY", "SPY"]"#),
             GOOD.replace("TSLA = 0.0", ""),
             GOOD.replace("SPY = 0.01", "SPY = 0.01\nAAPL = 0.01"),
+            format!("{GOOD}\n[dividend_model]\nAAPL = \"discrete\""),
+            format!("{GOOD}\n[dividend_model]\nSPY = \"continuous\""),
             GOOD.replace("SPY = 0.01", "SPY = 1.5"),
             GOOD.replace("SPY = 0.01", "SPY = -0.01"),
             GOOD.replace("vol_window_days = 60", "vol_window_days = 1"),

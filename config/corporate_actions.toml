@@ -1,0 +1,48 @@
+# Corporate actions (Part 19): demo events for the simulated market.
+#
+# Dates are "YYYY-MM-DD", or "+Nd" meaning N sessions after the simulation start
+# (weekdays only, holidays ignored). The simulation always starts on the same date, so a
+# "+2d" event is always coming up and the demo always shows one. Quote the dates.
+#
+# Each id must be unique and stable: the ledger of applied actions in the storage
+# folder and each position's `applied_actions` refer to it, so a restart never applies
+# a split twice. Events apply at the session open of their date, in the engine, before
+# that tick's valuation.
+#
+# split: `ratio` is new shares per old share. 4.0 is 4-for-1, 1.5 is 3-for-2 and 0.1 is
+# a 1-for-10 reverse split.
+# dividend: cash per share going ex at the open of `ex_date`. The symbol must be set to
+# "discrete" in config/market.toml. If a split lands first, the remaining dividends of
+# that symbol are divided by its ratio.
+
+[alpha_vantage]
+# Fetch real upcoming splits and dividends from Alpha Vantage and add them to the list
+# below. Off by default: the free key allows 25 requests a day (the price history
+# already uses 5), and real events say nothing about a simulated timeline.
+enabled = false
+
+[[split]]
+id = "demo-aapl-4-for-1"
+symbol = "AAPL"
+ratio = 4.0
+effective = "+2d"
+
+[[split]]
+id = "demo-tsla-3-for-2"
+symbol = "TSLA"
+ratio = 1.5
+effective = "+4d"
+
+# MSFT pays about $0.98 a quarter ($3.92 a year, see market.toml).
+[[dividend]]
+id = "demo-msft-quarterly"
+symbol = "MSFT"
+amount = 0.98
+ex_date = "+3d"
+
+# SPY pays about $1.90 a quarter ($7.58 a year, see market.toml).
+[[dividend]]
+id = "demo-spy-quarterly"
+symbol = "SPY"
+amount = 1.90
+ex_date = "+5d"

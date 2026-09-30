@@ -83,6 +83,7 @@ pub fn seed_data() -> SeedData {
         return_dates: Vec::new(),
         returns: Vec::new(),
         correlation: vec![vec![1.0]],
+        dividend_schedule: std::collections::BTreeMap::default(),
     }
 }
 

@@ -1,7 +1,7 @@
 //! The correlated geometric Brownian motion simulator with mean-reverting log vol.
 
 use chrono::{DateTime, Utc};
-use domain::{ClockStep, StepKind, Symbol};
+use domain::{ClockStep, SpotAdjustment, StepKind, Symbol};
 use nalgebra::{DMatrix, DVector};
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -231,6 +231,23 @@ impl PriceFeed for GbmSimulator {
         }
         Ok(self.current_tick(step.to, step.kind))
     }
+
+    /// Scales or reduces one symbol's spot. No random numbers are drawn, and the log vol
+    /// and its mean are untouched: vol is a property of returns, which a split does not
+    /// change, and a cash dividend of a few per cent leaves it alone too.
+    fn adjust_spot(
+        &mut self,
+        symbol: &Symbol,
+        adjustment: SpotAdjustment,
+    ) -> Result<(), FeedError> {
+        let state = self
+            .symbols
+            .iter_mut()
+            .find(|s| &s.symbol == symbol)
+            .ok_or_else(|| FeedError::UnknownSymbol(symbol.clone()))?;
+        state.spot = adjustment.apply(state.spot)?;
+        Ok(())
+    }
 }
 
 /// Checks the matrix is n × n, finite, symmetric with a unit diagonal and entries in [−1, 1],
@@ -338,6 +355,7 @@ mod tests {
             return_dates: Vec::new(),
             returns: Vec::new(),
             correlation,
+            dividend_schedule: BTreeMap::new(),
         }
     }
 
@@ -793,6 +811,80 @@ mod tests {
             assert_relative_eq!(state.vol(), q.vol);
             assert_relative_eq!(state.dividend_yield(), 0.01);
         }
+    }
+
+    #[test]
+    fn a_split_scales_the_spot_and_leaves_returns_and_vols_alone() {
+        let cfg = config(9, 0.03, 5.0, 0.9, -0.7);
+        let mut plain = two_symbols(0.4, &cfg);
+        let mut split = two_symbols(0.4, &cfg);
+        split
+            .adjust_spot(&sym("AAPL"), SpotAdjustment::DivideBy(4.0))
+            .unwrap();
+        assert_relative_eq!(
+            quote(
+                &split.current_tick(step_of(0.0).to, StepKind::Intraday),
+                "AAPL"
+            )
+            .spot,
+            50.0
+        );
+        // The random stream is untouched and the dynamics are multiplicative, so every later
+        // tick is the un-split one divided by the ratio, with identical vols.
+        for _ in 0..20 {
+            let a = plain.step(&step_of(1e-3)).unwrap();
+            let b = split.step(&step_of(1e-3)).unwrap();
+            assert_relative_eq!(
+                quote(&b, "AAPL").spot,
+                quote(&a, "AAPL").spot / 4.0,
+                max_relative = 1e-12
+            );
+            assert_relative_eq!(
+                quote(&b, "AAPL").vol,
+                quote(&a, "AAPL").vol,
+                max_relative = 1e-12
+            );
+            assert_relative_eq!(
+                quote(&b, "SPY").spot,
+                quote(&a, "SPY").spot,
+                max_relative = 1e-12
+            );
+        }
+    }
+
+    #[test]
+    fn a_dividend_drops_the_spot_by_the_amount_and_a_bad_adjustment_changes_nothing() {
+        let mut sim = one_symbol(0.2, &config(1, 0.0, 5.0, 0.9, -0.7));
+        sim.adjust_spot(&sym("SPY"), SpotAdjustment::Subtract(1.5))
+            .unwrap();
+        let tick = sim.step(&overnight()).unwrap();
+        assert_relative_eq!(quote(&tick, "SPY").spot, 98.5);
+        let too_big = sim.adjust_spot(&sym("SPY"), SpotAdjustment::Subtract(98.5));
+        assert!(matches!(too_big, Err(FeedError::Domain(_))));
+        assert!(matches!(
+            sim.adjust_spot(&sym("NVDA"), SpotAdjustment::DivideBy(2.0)),
+            Err(FeedError::UnknownSymbol(_))
+        ));
+        let tick = sim.step(&overnight()).unwrap();
+        assert_relative_eq!(quote(&tick, "SPY").spot, 98.5);
+    }
+
+    #[test]
+    fn a_feed_without_support_reports_it() {
+        struct Fixed;
+        impl PriceFeed for Fixed {
+            fn step(&mut self, step: &ClockStep) -> Result<MarketTick, FeedError> {
+                Ok(MarketTick {
+                    time: step.to,
+                    kind: step.kind,
+                    quotes: std::collections::BTreeMap::new(),
+                })
+            }
+        }
+        assert!(matches!(
+            Fixed.adjust_spot(&sym("SPY"), SpotAdjustment::DivideBy(2.0)),
+            Err(FeedError::Unsupported(_))
+        ));
     }
 
     #[test]

@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use domain::{ClockStep, DomainError, MarketState, StepKind, Symbol};
+use domain::{ClockStep, DomainError, MarketState, SpotAdjustment, StepKind, Symbol};
 use thiserror::Error;
 
 use crate::config::ConfigError;
@@ -59,6 +59,28 @@ pub trait PriceFeed {
     /// [`FeedError`] when the step is invalid or the move produces a value that is not a
     /// positive finite number. The feed's prices are unchanged on error.
     fn step(&mut self, step: &ClockStep) -> Result<MarketTick, FeedError>;
+
+    /// Applies a split or a cash dividend to one symbol's spot, as at a session open.
+    ///
+    /// The feed keeps its own price state and emits absolute spots every step, so a
+    /// corporate action applied only to the market state would be overwritten by the next
+    /// tick. The engine therefore applies each action to the feed and to the market with
+    /// the same [`SpotAdjustment`]. Returns are unaffected: a split is a change of unit.
+    ///
+    /// # Errors
+    ///
+    /// [`FeedError::Unsupported`] for a feed that cannot do this (the default),
+    /// [`FeedError::UnknownSymbol`] for a symbol the feed does not hold, and
+    /// [`FeedError::Domain`] when the adjustment would leave the spot at or below zero.
+    /// The feed's prices are unchanged on error.
+    fn adjust_spot(
+        &mut self,
+        symbol: &Symbol,
+        adjustment: SpotAdjustment,
+    ) -> Result<(), FeedError> {
+        let _ = (symbol, adjustment);
+        Err(FeedError::Unsupported("spot adjustments"))
+    }
 }
 
 /// A price feed could not be built or stepped.
@@ -93,6 +115,15 @@ pub enum FeedError {
         /// The offending value.
         value: f64,
     },
+    /// The feed does not support the named operation.
+    #[error("this feed does not support {0}")]
+    Unsupported(&'static str),
+    /// A spot adjustment named a symbol the feed does not hold.
+    #[error("the feed has no symbol {0}")]
+    UnknownSymbol(Symbol),
+    /// A spot adjustment was invalid.
+    #[error(transparent)]
+    Domain(#[from] DomainError),
     /// The simulation configuration is invalid.
     #[error(transparent)]
     Config(#[from] ConfigError),

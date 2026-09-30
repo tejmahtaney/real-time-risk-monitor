@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, NaiveDate, Utc};
-use domain::{MarketState, Symbol, UnderlyingState};
+use domain::{CashDividend, MarketState, Symbol, UnderlyingState};
 use serde::{Deserialize, Serialize};
 
 use crate::error::CalibrationError;
@@ -47,11 +47,16 @@ pub struct SeedData {
     pub returns: Vec<Vec<f64>>,
     /// Correlation matrix of the aligned returns. Symmetric with an exact unit diagonal.
     pub correlation: Vec<Vec<f64>>,
+    /// Pending cash dividends for the symbols on the discrete dividend model. A symbol with
+    /// an entry here, even an empty one, is priced with the escrowed model. Empty for a
+    /// seed calibrated from history: the app fills it from the corporate-action calendar.
+    #[serde(default)]
+    pub dividend_schedule: BTreeMap<Symbol, Vec<CashDividend>>,
 }
 
 impl SeedData {
     /// The market state at `now` built from the seed: each symbol's spot, chosen vol and
-    /// dividend yield, and the seed's rate.
+    /// dividend yield, and the seed's rate, plus the discrete dividend schedule.
     ///
     /// # Errors
     ///
@@ -63,6 +68,7 @@ impl SeedData {
             let state = UnderlyingState::new(seed.spot, seed.vol, seed.dividend_yield)?;
             underlyings.push((symbol.clone(), state));
         }
-        Ok(MarketState::new(now, self.rate, underlyings)?)
+        Ok(MarketState::new(now, self.rate, underlyings)?
+            .with_discrete_dividends(self.dividend_schedule.clone())?)
     }
 }

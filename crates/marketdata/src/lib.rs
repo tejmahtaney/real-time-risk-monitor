@@ -15,6 +15,7 @@ mod archive;
 mod calibration;
 mod clock;
 mod config;
+mod corporate_actions;
 mod error;
 mod fallback;
 mod feed;
@@ -27,7 +28,11 @@ mod source;
 pub use archive::{Archive, ArchiveHit, ArchiveRecord};
 pub use calibration::{EWMA_LAMBDA, TRADING_DAYS_PER_YEAR, calibrate};
 pub use clock::SystemClock;
-pub use config::{ConfigError, DataMode, MarketConfig, VolMethod};
+pub use config::{ConfigError, DataMode, DividendModel, MarketConfig, VolMethod};
+pub use corporate_actions::{
+    ActionsSourceConfig, CorporateActionCalendar, CorporateActionError, CorporateActionsConfig,
+    DividendEntry, EventDate, ScheduledAction, SplitEntry, apply_ledger_to_seed,
+};
 pub use error::{CalibrationError, MarketDataError};
 pub use fallback::{fallback_path, read_fallback, write_fallback};
 pub use feed::{FeedError, MarketTick, PriceFeed, Quote};

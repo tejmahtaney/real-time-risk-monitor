@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use chrono::NaiveDate;
 use domain::Symbol;
 
-use crate::config::{MarketConfig, VolMethod};
+use crate::config::{DividendModel, MarketConfig, VolMethod};
 use crate::error::CalibrationError;
 use crate::loader::LoadedHistory;
 use crate::seed::{SeedData, SymbolSeed};
@@ -223,6 +223,11 @@ pub fn calibrate(
             .dividend_yields
             .get(symbol)
             .ok_or_else(|| CalibrationError::MissingDividendYield(symbol.clone()))?;
+        // A symbol on the discrete model has q = 0: its dividends are counted once, as cash.
+        let dividend_yield = match config.model_of(symbol) {
+            DividendModel::Yield => dividend_yield,
+            DividendModel::Discrete => 0.0,
+        };
         let (seed, adjusted) = calibrate_symbol(symbol, history, dividend_yield, config)?;
         underlyings.insert(symbol.clone(), seed);
         adjusted_all.push(adjusted);
@@ -258,6 +263,7 @@ pub fn calibrate(
         return_dates,
         returns,
         correlation,
+        dividend_schedule: BTreeMap::new(),
     })
 }
 
@@ -408,6 +414,7 @@ mod tests {
             symbols: symbols.iter().map(|s| sym(s)).collect(),
             risk_free_rate: 0.04,
             dividend_yields: symbols.iter().map(|s| (sym(s), 0.01)).collect(),
+            dividend_model: BTreeMap::new(),
             vol_window_days: window,
             vol_method: method,
             cache_max_age_hours: 24,
