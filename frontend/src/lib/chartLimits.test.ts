@@ -104,21 +104,22 @@ describe('computeChartScale', () => {
 
   it('picks the lower side when the data leans negative', () => {
     const bounds: MetricBounds = {
-      upper: { limit: 4_500, warningStart: 3_600 },
+      upper: { limit: 4_000, warningStart: 3_200 },
       lower: { limit: -4_500, warningStart: -3_600 },
     }
     // dataMin=-3000, dataMax=-2000: positive extent 0, negative extent 3000 -> lower side.
+    // The band is too far off to draw, but the label shows the lower limit.
     const scale = computeChartScale([-2_000, -2_500, -3_000], bounds)
-    expect(scale.visibleBound).toEqual(bounds.lower)
+    expect(scale.offscreenLimit).toBe(4_500)
   })
 
   it('breaks a tie between equal positive and negative extents towards the upper side', () => {
     // Deliberately very different upper/lower limits, so picking the wrong side would
-    // be obvious: domain-only reach here is 60 (see the padding test above), and 90
-    // sits right at 1.5x that, so the upper bound should draw; -500 is nowhere close
+    // be obvious: domain-only reach here is 77, and 90
+    // sits well inside 1.5x that, so the upper bound should draw; -500 is nowhere close
     // to visible, so if the lower bound were picked instead, nothing would draw.
     const bounds: MetricBounds = { upper: { limit: 90, warningStart: 72 }, lower: { limit: -500, warningStart: -400 } }
-    const scale = computeChartScale([-50, 50], bounds)
+    const scale = computeChartScale([-70, 70], bounds)
     expect(scale.visibleBound).toEqual(bounds.upper)
   })
 
@@ -137,12 +138,13 @@ describe('computeChartScale', () => {
       upper: { limit: 550_000, warningStart: 440_000 },
       lower: { limit: -550_000, warningStart: -440_000 },
     }
-    const scale = computeChartScale([490_000, 500_000, 510_000], bounds)
-    // data-only domain would be [488_000, 512_000]; domainReach 512_000, limit 550_000
-    // is within 1.5x (768_000), so the upper side extends to include it (plus 10%
+    const scale = computeChartScale([300_000, 400_000, 510_000], bounds)
+    // data-only domain would be [279_000, 531_000]; domainReach 531_000, limit 550_000
+    // is within 1.5x, so the upper side extends to include it (plus 10%
     // headroom on the extended reach: 550_000 * 1.1 = 605_000); the lower side keeps
     // its data-only pad untouched.
-    expect(scale.domain).toEqual([488_000, 605_000])
+    expect(scale.domain[0]).toBeCloseTo(279_000)
+    expect(scale.domain[1]).toBeCloseTo(605_000)
     expect(scale.visibleBound).toEqual(bounds.upper)
     expect(scale.offscreenLimit).toBeNull()
   })
@@ -162,12 +164,34 @@ describe('computeChartScale', () => {
   it('is visible exactly at 1.5x the domain reach, and offscreen just past it', () => {
     // values=[0, 100]: range 100, pad 10 -> domain [-10, 110], domainReach (upper) = 110.
     const values = [0, 100]
-    const visibleBounds: MetricBounds = { upper: { limit: 165, warningStart: 132 }, lower: null }
+    const visibleBounds: MetricBounds = { upper: { limit: 165, warningStart: 110 }, lower: null }
     expect(computeChartScale(values, visibleBounds).visibleBound).not.toBeNull()
 
-    const offscreenBounds: MetricBounds = { upper: { limit: 166, warningStart: 132.8 }, lower: null }
+    const offscreenBounds: MetricBounds = { upper: { limit: 166, warningStart: 110.7 }, lower: null }
     const scale = computeChartScale(values, offscreenBounds)
     expect(scale.visibleBound).toBeNull()
     expect(scale.offscreenLimit).toBe(166)
+  })
+
+  it('keeps a flat Vega series at 68% of its limit on a tight axis, with the limit as a label (Part 23)', () => {
+    // Vega near $1.5k against a $2.2k limit: warning line at $1.76k. The data has not
+    // come within 10% of it, and drawing the band would leave the data in under a
+    // third of the plot height.
+    const bounds: MetricBounds = {
+      upper: { limit: 2_200, warningStart: 1_760 },
+      lower: { limit: -2_200, warningStart: -1_760 },
+    }
+    const scale = computeChartScale([1_480, 1_500, 1_520], bounds)
+    expect(scale.visibleBound).toBeNull()
+    expect(scale.offscreenLimit).toBe(2_200)
+    expect(scale.domain[1]).toBeLessThan(1_600)
+  })
+
+  it('draws the band once the data is within 10% of the warning line and still fills half the plot', () => {
+    const bounds: MetricBounds = { upper: { limit: 2_000, warningStart: 1_600 }, lower: null }
+    const scale = computeChartScale([1_400, 1_900], bounds)
+    expect(scale.visibleBound).toEqual(bounds.upper)
+    const [lo, hi] = scale.domain
+    expect((1_900 - 1_400) / (hi - lo)).toBeGreaterThanOrEqual(0.5)
   })
 })

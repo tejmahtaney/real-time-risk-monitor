@@ -74,7 +74,14 @@ function Money({ value }: { value: number }): ReactElement {
 }
 
 /** The summary cards of one run. Shared with the saved-run comparison. */
-export function SummaryCards({ results }: { results: BacktestResults }): ReactElement {
+export function SummaryCards({
+  results,
+  showBuckets = true,
+}: {
+  results: BacktestResults
+  /** The comparison view turns this off: it has a full P&L by bucket table of its own. */
+  showBuckets?: boolean
+}): ReactElement {
   const { summary } = results
   const drawdown = summary.max_drawdown
   return (
@@ -123,6 +130,7 @@ export function SummaryCards({ results }: { results: BacktestResults }): ReactEl
         <span className="text-lg font-semibold tabular-nums">{summary.days_with_breaches}</span>
         <span className="text-xs text-neutral">days with a limit in breach</span>
       </Card>
+      {showBuckets && (
       <Card label="P&L by bucket">
         <ul className="grid grid-cols-2 gap-x-3 text-xs tabular-nums">
           {BUCKET_SERIES.map(({ key, label }) => (
@@ -135,6 +143,7 @@ export function SummaryCards({ results }: { results: BacktestResults }): ReactEl
           ))}
         </ul>
       </Card>
+      )}
     </div>
   )
 }

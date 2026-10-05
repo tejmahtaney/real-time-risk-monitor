@@ -92,6 +92,16 @@ const MIN_HALF_SPAN = 1
  * that is genuinely far from what the chart is actually showing. */
 const LIMIT_VISIBILITY_FACTOR = 1.5
 
+/** How close the data's own extreme must come to the warning line, as a fraction of
+ * the warning magnitude, before the line and band are brought into view. Below this
+ * the band is only a corner label, so a value sitting at 65–80% of its limit does
+ * not stretch the axis to include a band it has not reached. */
+const WARNING_APPROACH_MARGIN = 0.1
+
+/** The least share of the plot height the data-only domain may take once the axis is
+ * extended out to a limit. Below it the band is dropped to a corner label. */
+const MIN_DATA_FILL = 0.5
+
 /** What a Greeks-over-time chart needs to draw one metric: the y-axis domain, the
  * one reference bound to draw (if any), and a limit value to show as a small
  * corner label instead, when the real limit is configured but too far away to
@@ -148,7 +158,19 @@ export function computeChartScale(values: number[], bounds: MetricBounds): Chart
 
   const limitMagnitude = Math.abs(candidate.limit)
   const domainReach = side === 'upper' ? domainMax : Math.abs(domainMin)
-  const visible = limitMagnitude <= domainReach * LIMIT_VISIBILITY_FACTOR
+  const dataExtent = side === 'upper' ? positiveExtent : negativeExtent
+  const warningMagnitude = Math.abs(candidate.warningStart)
+  const nearWarning = dataExtent >= warningMagnitude * (1 - WARNING_APPROACH_MARGIN)
+  const withinReach = limitMagnitude <= domainReach * LIMIT_VISIBILITY_FACTOR
+
+  // The axis the band would need, so the data's share of the plot height is known
+  // before deciding to draw it.
+  const extendedReach = Math.max(domainReach, limitMagnitude, warningMagnitude)
+  const extendedEdge = extendedReach + extendedReach * 0.1
+  const dataOnlySpan = domainMax - domainMin
+  const extendedSpan = side === 'upper' ? extendedEdge - domainMin : domainMax + extendedEdge
+  const fillsPlot = dataOnlySpan >= extendedSpan * MIN_DATA_FILL
+  const visible = withinReach && nearWarning && fillsPlot
 
   if (!visible) {
     return { domain: [domainMin, domainMax], visibleBound: null, offscreenLimit: limitMagnitude }
@@ -156,13 +178,10 @@ export function computeChartScale(values: number[], bounds: MetricBounds): Chart
 
   // Extend only the active side out to the limit (plus its own 10% headroom), so
   // the line and band are never clipped; the other side keeps its data-only pad.
-  const warningMagnitude = Math.abs(candidate.warningStart)
-  const extendedReach = Math.max(domainReach, limitMagnitude, warningMagnitude)
-  const extendedPad = extendedReach * 0.1
   if (side === 'upper') {
-    domainMax = extendedReach + extendedPad
+    domainMax = extendedEdge
   } else {
-    domainMin = -(extendedReach + extendedPad)
+    domainMin = -extendedEdge
   }
   return { domain: [domainMin, domainMax], visibleBound: candidate, offscreenLimit: null }
 }

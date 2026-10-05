@@ -67,7 +67,7 @@ export function CompareRuns({
                 <h3 className="text-sm font-semibold" style={{ color: i === 0 ? CHART_LINE : COLOR_B }}>
                   {i === 0 ? 'A' : 'B'}: <span className="font-mono">{run.settings.run_id}</span>
                 </h3>
-                <SummaryCards results={run} />
+                <SummaryCards results={run} showBuckets={false} />
               </section>
             ))}
           </div>
