@@ -233,10 +233,13 @@ function RowMenu({ position, onRemoved }: { position: PositionRisk; onRemoved: (
 export function PositionsTable({
   positions,
   onPositionsChanged,
+  readOnly = false,
   className = '',
 }: {
   positions: PositionRisk[]
   onPositionsChanged?: () => void
+  /** Hides the row menu, so a replayed book cannot change the live one. */
+  readOnly?: boolean
   className?: string
 }): ReactElement {
   const [sort, setSort] = useState<SortState>(() => loadSortState() ?? DEFAULT_SORT)
@@ -302,7 +305,7 @@ export function PositionsTable({
                 group={group}
                 sort={sort}
                 flashes={flashes}
-                onRemoved={() => onPositionsChanged?.()}
+                onRemoved={readOnly ? undefined : () => onPositionsChanged?.()}
               />
             ))}
           </tbody>
@@ -321,7 +324,7 @@ function GroupRows({
   group: ReturnType<typeof groupPositions>[number]
   sort: SortState
   flashes: Map<string, 'up' | 'down'>
-  onRemoved: () => void
+  onRemoved: (() => void) | undefined
 }): ReactElement {
   const rows = sortRows(group.rows, sort)
   return (
@@ -384,7 +387,7 @@ function PositionRow({
 }: {
   row: PositionRisk
   flashes: Map<string, 'up' | 'down'>
-  onRemoved: () => void
+  onRemoved: (() => void) | undefined
 }): ReactElement {
   const expired = row.status.state === 'expired'
   const errorReason = row.status.state === 'error' ? row.status.reason : undefined
@@ -447,7 +450,7 @@ function PositionRow({
       </td>
       <td className="whitespace-nowrap px-2 py-1 text-right capitalize">{row.status.state}</td>
       <td className="whitespace-nowrap px-2 py-1 text-right">
-        <RowMenu position={row} onRemoved={onRemoved} />
+        {onRemoved && <RowMenu position={row} onRemoved={onRemoved} />}
       </td>
     </tr>
   )

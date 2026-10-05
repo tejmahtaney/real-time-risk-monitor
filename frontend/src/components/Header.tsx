@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactElement } from 'react'
+import { useCallback, useState, type ReactElement, type ReactNode } from 'react'
 
 import { api } from '../api/rest'
 import { formatMicros, formatSimTime } from '../lib/format'
@@ -15,8 +15,11 @@ function formatSpeed(speed: number): string {
  * since the polling fallback does not carry a full snapshot (see `src/api/stream.ts`).
  * That is the correct value to show, but not to show unlabelled: while disconnected
  * (`polling` or `closed`), these frozen fields are greyed out with a "stale" marker,
- * comparing `status` itself since a snapshot carries no staleness flag of its own. */
-export function Header(): ReactElement {
+ * comparing `status` itself since a snapshot carries no staleness flag of its own.
+ *
+ * The header always shows the *live* feed, on the backtest page too: a replay's progress and
+ * date are shown by the replay view, from its own `BacktestStatus`. `nav` is the mode switch. */
+export function Header({ nav }: { nav?: ReactNode } = {}): ReactElement {
   const status = useConnectionStatus()
   const snapshot = useSnapshot()
   const [pending, setPending] = useState(false)
@@ -40,6 +43,7 @@ export function Header(): ReactElement {
       <div className="flex items-center gap-4">
         <h1 className="text-lg font-semibold">Real-Time Risk Monitor</h1>
         <ConnectionDot status={status} />
+        {nav}
       </div>
       <div
         className={`flex flex-wrap items-center gap-4 text-sm tabular-nums ${stale ? 'text-neutral/70' : ''}`}

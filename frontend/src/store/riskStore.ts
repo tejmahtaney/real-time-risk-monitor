@@ -92,39 +92,58 @@ const initialState = {
   polledPositions: null as PositionRisk[] | null,
 }
 
-export const useRiskStore = create<RiskState>((set) => ({
-  ...initialState,
+/** Builds one source's slice of client state. The live feed and a backtest replay each get
+ * their own, so a replay never overwrites the live dashboard's data. */
+export function createRiskStore() {
+  return create<RiskState>((set) => ({
+    ...initialState,
 
-  setStatus: (status) => set({ status }),
-  setError: (lastError) => set({ lastError }),
-  setPolled: (polledSummary, polledPositions) => set({ polledSummary, polledPositions }),
+    setStatus: (status) => set({ status }),
+    setError: (lastError) => set({ lastError }),
+    setPolled: (polledSummary, polledPositions) => set({ polledSummary, polledPositions }),
 
-  applySnapshot: (snapshot) =>
-    set((state) => ({
-      snapshot,
-      history: mergeHistoryPoints(state.history, [historyPointFromSnapshot(snapshot)]),
-    })),
+    applySnapshot: (snapshot) =>
+      set((state) => ({
+        snapshot,
+        history: mergeHistoryPoints(state.history, [historyPointFromSnapshot(snapshot)]),
+      })),
 
-  mergeHistory: (points) =>
-    set((state) => ({ history: mergeHistoryPoints(state.history, points) })),
+    mergeHistory: (points) =>
+      set((state) => ({ history: mergeHistoryPoints(state.history, points) })),
 
-  addAlert: (alert) =>
-    set((state) => {
-      const alerts = [...state.alerts, alert]
-      return { alerts: alerts.length > ALERT_CAP ? alerts.slice(alerts.length - ALERT_CAP) : alerts }
-    }),
+    addAlert: (alert) =>
+      set((state) => {
+        const alerts = [...state.alerts, alert]
+        return {
+          alerts: alerts.length > ALERT_CAP ? alerts.slice(alerts.length - ALERT_CAP) : alerts,
+        }
+      }),
 
-  reset: () => set(initialState),
-}))
+    reset: () => set(initialState),
+  }))
+}
+
+/** The live feed's store. */
+export const useRiskStore = createRiskStore()
+/** The backtest replay's store, independent of {@link useRiskStore}. */
+export const useBacktestStore = createRiskStore()
+
+/** A store hook, either source's. */
+export type RiskStore = typeof useRiskStore
 
 // Selectors: each subscribes a component to exactly one slice, so, for example, the
 // alerts pane does not re-render every time a new snapshot arrives.
-export const useConnectionStatus = (): ConnectionStatus => useRiskStore((state) => state.status)
-export const useSnapshot = (): RiskSnapshot | null => useRiskStore((state) => state.snapshot)
-export const useHistory = (): HistoryPoint[] => useRiskStore((state) => state.history)
-export const useAlerts = (): AlertEvent[] => useRiskStore((state) => state.alerts)
-export const useLastError = (): string | null => useRiskStore((state) => state.lastError)
-export const usePolledSummary = (): RiskSummaryResponse | null =>
-  useRiskStore((state) => state.polledSummary)
-export const usePolledPositions = (): PositionRisk[] | null =>
-  useRiskStore((state) => state.polledPositions)
+export const useConnectionStatus = (store: RiskStore = useRiskStore): ConnectionStatus =>
+  store((state) => state.status)
+export const useSnapshot = (store: RiskStore = useRiskStore): RiskSnapshot | null =>
+  store((state) => state.snapshot)
+export const useHistory = (store: RiskStore = useRiskStore): HistoryPoint[] =>
+  store((state) => state.history)
+export const useAlerts = (store: RiskStore = useRiskStore): AlertEvent[] =>
+  store((state) => state.alerts)
+export const useLastError = (store: RiskStore = useRiskStore): string | null =>
+  store((state) => state.lastError)
+export const usePolledSummary = (store: RiskStore = useRiskStore): RiskSummaryResponse | null =>
+  store((state) => state.polledSummary)
+export const usePolledPositions = (store: RiskStore = useRiskStore): PositionRisk[] | null =>
+  store((state) => state.polledPositions)

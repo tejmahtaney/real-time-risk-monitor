@@ -4,8 +4,14 @@
  * generated from the Rust types by `ts-rs` (see `src/api/generated/`), so a route's
  * shape can never silently drift between the backend and this file.
  */
+import type { ArchiveCoverage } from './generated/ArchiveCoverage'
 import type { AlertsResponse } from './generated/AlertsResponse'
 import type { ArchiveFileInfo as _ArchiveFileInfo } from './generated/ArchiveFileInfo'
+import type { BacktestControlRequest } from './generated/BacktestControlRequest'
+import type { BacktestCreateRequest } from './generated/BacktestCreateRequest'
+import type { BacktestListItem } from './generated/BacktestListItem'
+import type { BacktestResults } from './generated/BacktestResults'
+import type { BacktestStatus } from './generated/BacktestStatus'
 import type { ControlRequest } from './generated/ControlRequest'
 import type { GreeksResponse } from './generated/GreeksResponse'
 import type { HealthResponse } from './generated/HealthResponse'
@@ -61,8 +67,12 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
   return (await response.json()) as T
 }
 
-async function del(path: string): Promise<void> {
-  const response = await fetch(path, { method: 'DELETE' })
+async function del(path: string, body?: unknown): Promise<void> {
+  const response = await fetch(path, {
+    method: 'DELETE',
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
   if (!response.ok) {
     throw new ApiError(response.status, await describeError(response))
   }
@@ -128,5 +138,43 @@ export const api = {
   loadPortfolioVersion: (file: string): Promise<LoadedVersionResponse> =>
     postJson(`/api/portfolio/versions/${encodeURIComponent(file)}/load`),
 
+  backtests: (): Promise<BacktestListItem[]> => getJson('/api/backtests'),
+  archiveCoverage: (): Promise<ArchiveCoverage> => getJson('/api/backtests/archive-coverage'),
+  backtestStatus: (id: string): Promise<BacktestStatus> =>
+    getJson(`/api/backtests/${encodeURIComponent(id)}`),
+  backtestResults: (id: string): Promise<BacktestResults> =>
+    getJson(`/api/backtests/${encodeURIComponent(id)}/results`),
+  /** Starts a run from the local archive. */
+  createArchiveBacktest: (
+    request: Omit<Extract<BacktestCreateRequest, { source: 'archive' }>, 'source'> = {},
+  ): Promise<BacktestStatus> => postJson('/api/backtests', { source: 'archive', ...request }),
+  /** Starts a run from an uploaded price CSV. A 400 carries the server's line-numbered message. */
+  uploadBacktest: async (file: File): Promise<BacktestStatus> => {
+    const form = new FormData()
+    form.append('file', file)
+    const response = await fetch('/api/backtests', { method: 'POST', body: form })
+    if (!response.ok) {
+      throw new ApiError(response.status, await describeError(response))
+    }
+    return (await response.json()) as BacktestStatus
+  },
+  backtestControl: (id: string, request: BacktestControlRequest): Promise<BacktestStatus> =>
+    postJson(`/api/backtests/${encodeURIComponent(id)}/control`, request),
+  /** Frees a run's memory on the server. Its saved files stay. */
+  stopBacktest: (id: string): Promise<void> => del(`/api/backtests/${encodeURIComponent(id)}`),
+  /** Deletes a run's saved files. `confirm` must repeat the run id. */
+  deleteBacktestFiles: (id: string): Promise<void> =>
+    del(`/api/backtests/${encodeURIComponent(id)}/files`, { confirm: id }),
+
   marketDataArchive: (): Promise<SymbolArchive[]> => getJson('/api/market-data/archive'),
+}
+
+/** Frees a run on the server as the page unloads. `fetch` with `keepalive` outlives the page;
+ * `navigator.sendBeacon` is POST only, so it cannot send a DELETE. Errors are ignored: there
+ * is no page left to show them on. */
+export function releaseBacktestOnUnload(id: string): void {
+  void fetch(`/api/backtests/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    keepalive: true,
+  }).catch(() => undefined)
 }

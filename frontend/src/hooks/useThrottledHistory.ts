@@ -13,17 +13,20 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type { HistoryPoint } from '../api/generated/HistoryPoint'
-import { useRiskStore } from '../store/riskStore'
+import { useRiskStore, type RiskStore } from '../store/riskStore'
 
 const DEFAULT_INTERVAL_MS = 500
 
-export function useThrottledHistory(intervalMs = DEFAULT_INTERVAL_MS): HistoryPoint[] {
-  const pendingRef = useRef<HistoryPoint[]>(useRiskStore.getState().history)
+export function useThrottledHistory(
+  intervalMs = DEFAULT_INTERVAL_MS,
+  store: RiskStore = useRiskStore,
+): HistoryPoint[] {
+  const pendingRef = useRef<HistoryPoint[]>(store.getState().history)
   const dirtyRef = useRef(false)
   const [history, setHistory] = useState(pendingRef.current)
 
   useEffect(() => {
-    const unsubscribe = useRiskStore.subscribe((state) => {
+    const unsubscribe = store.subscribe((state) => {
       pendingRef.current = state.history
       dirtyRef.current = true
     })
@@ -36,7 +39,7 @@ export function useThrottledHistory(intervalMs = DEFAULT_INTERVAL_MS): HistoryPo
       unsubscribe()
       clearInterval(timer)
     }
-  }, [intervalMs])
+  }, [intervalMs, store])
 
   return history
 }
