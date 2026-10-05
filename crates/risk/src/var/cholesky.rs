@@ -20,6 +20,9 @@ const SHRINKAGE_STEP: f64 = 0.05;
 ///
 /// A plain O(n³) implementation: `matrix` holds at most a handful of
 /// underlyings, so there is no need for anything more sophisticated.
+///
+/// Indexing is in range by construction: `matrix` is square (built `n × n` by the
+/// correlation step), `l` is allocated `n × n` here, and `j <= i < n` throughout.
 fn cholesky(matrix: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
     let n = matrix.len();
     let mut l = vec![vec![0.0_f64; n]; n];
@@ -45,7 +48,8 @@ fn cholesky(matrix: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
     Some(l)
 }
 
-/// `(1 − λ) · matrix + λ · I`.
+/// `(1 − λ) · matrix + λ · I`. `matrix` is square, so `matrix[i][j]` is in range for
+/// every `i, j < n`.
 fn shrink_towards_identity(matrix: &[Vec<f64>], lambda: f64) -> Vec<Vec<f64>> {
     let n = matrix.len();
     (0..n)

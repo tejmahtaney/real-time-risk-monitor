@@ -292,6 +292,7 @@ async fn ws_handler(
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
     safe_segment(&id)?;
+    ws::check_capacity(&state.ws_clients)?;
     let subscription = state.backtests.subscribe(&id)?;
     let ws_clients = Arc::clone(&state.ws_clients);
     Ok(ws.on_upgrade(move |socket| async move {

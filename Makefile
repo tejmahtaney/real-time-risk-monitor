@@ -1,5 +1,5 @@
 .PHONY: fmt lint test check run snapshot history storage-usage types frontend-install \
-	frontend-dev dev ci types-check frontend-ci docker-build docker-up docker-down hooks
+	frontend-dev dev ci types-check frontend-ci docker-build docker-up docker-down hooks demo
 
 fmt:
 	cargo fmt --all
@@ -95,3 +95,20 @@ docker-down:
 hooks:
 	install -m 755 scripts/pre-commit .git/hooks/pre-commit
 	@echo "Installed scripts/pre-commit -> .git/hooks/pre-commit"
+
+# Records the scripted demo and converts it. Needs the app already running (`make dev`) on a
+# throwaway storage folder, plus ffmpeg. The WebM is a temporary file; the outputs are
+# docs/demo.gif (12 fps, two-pass palette, under 10 MB) and docs/demo.mp4. If the GIF is
+# over 10 MB, lower the width in the scale filter below.
+demo:
+	@command -v ffmpeg >/dev/null || { echo "ffmpeg is required for make demo" >&2; exit 1; }
+	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
+	RRM_DEMO_OUT="$$tmp/demo.webm" npm --prefix frontend run demo && \
+	ffmpeg -y -loglevel error -i "$$tmp/demo.webm" \
+		-vf "fps=12,scale=1000:-1:flags=lanczos,palettegen=stats_mode=diff" "$$tmp/palette.png" && \
+	ffmpeg -y -loglevel error -i "$$tmp/demo.webm" -i "$$tmp/palette.png" \
+		-lavfi "fps=12,scale=1000:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5" docs/demo.gif && \
+	ffmpeg -y -loglevel error -i "$$tmp/demo.webm" -vf "scale=1440:-2,format=yuv420p" \
+		-c:v libx264 -crf 23 -movflags +faststart docs/demo.mp4 && \
+	ls -lh docs/demo.gif docs/demo.mp4 && \
+	if [ "$$(stat -c %s docs/demo.gif)" -gt 10485760 ]; then echo "docs/demo.gif is over 10 MB; narrow the scale filter" >&2; exit 1; fi

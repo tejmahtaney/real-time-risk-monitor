@@ -11,7 +11,8 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest",
     "format": "prettier --write .",
-    "screenshot": "tsx scripts/screenshot.ts"
+    "screenshot": "tsx scripts/screenshot.ts",
+    "demo": "tsx scripts/record-demo.ts"
   },
   "dependencies": {
     "react": "^19.2.8",

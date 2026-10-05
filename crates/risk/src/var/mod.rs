@@ -195,7 +195,9 @@ fn interpolated_quantile(sorted_ascending: &[f64], p: f64) -> f64 {
         return 0.0;
     }
     #[allow(clippy::cast_precision_loss)]
-    let position = p * (n as f64 - 1.0);
+    // Clamping `p` keeps both indices inside the slice even for a caller bug (p > 1).
+    // A NaN `p` saturates to index 0 in the casts below, so it cannot index out of range.
+    let position = p.clamp(0.0, 1.0) * (n as f64 - 1.0);
     let lower = position.floor();
     let upper = position.ceil();
     let frac = position - lower;
@@ -440,6 +442,7 @@ impl VarCalculator {
         let started = Instant::now();
         let symbols: Vec<&Symbol> = summary.by_underlying.keys().collect();
 
+        // `summary.by_underlying[a]` cannot miss: every `a` and `b` is a key of that same map.
         let mut variance = 0.0;
         for &a in &symbols {
             let delta_a = summary.by_underlying[a].dollar_delta;
@@ -542,6 +545,9 @@ impl VarCalculator {
             .map(|s| summary.by_underlying[s].dollar_gamma_1pct)
             .collect();
 
+        // Indexing below is in range by construction: `symbols` is the key set of
+        // `summary.by_underlying`, `cache.epsilon` has `MC_SCENARIOS` rows of `n` draws and
+        // `cache.chol` is `n × n`, both built for these same symbols (see `mc_cache`).
         let mut losses = vec![0.0_f64; MC_SCENARIOS];
         for (scenario, loss) in losses.iter_mut().enumerate() {
             let eps = &cache.epsilon[scenario];

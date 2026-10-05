@@ -15,7 +15,7 @@ A real-time risk monitor for an options book. A Rust backend prices European opt
 - **Limits and alerts.** Eight kinds of limit with warning and breach states. Hysteresis stops alerts flickering.
 - **Backtester.** Replays the same engine over real daily closes (the local archive or an uploaded file), with a VaR back-test using the Kupiec test.
 - **Splits and dividends.** Stock splits adjust positions without changing their value. Discrete dividends use the escrowed model.
-- **Real-data-seeded simulation.** Vols, correlations and the rate come from real closes. Prices then follow correlated geometric Brownian motion with mean-reverting log vol.
+- **Real-data-seeded simulation.** Vols and correlations come from real closes. The risk-free rate is a Treasury yield entered by hand in `config/market.toml`. Prices then follow correlated geometric Brownian motion with mean-reverting log vol.
 - **Every session saved locally.** Ticks, events, daily P&L and closing snapshots are written to disk. Five pages browse them: Live, Backtest, History, Portfolios and Data.
 
 | Live | Backtest |
@@ -320,7 +320,7 @@ make ci         # make check, the generated-types check, the frontend checks and
 
 ## Performance
 
-Measured on the development machine, an AMD Ryzen 5 5500 (12 threads) running Linux. These are the figures logged during the build and were not re-measured for this document.
+Measured on the development machine, **[CPU model: to be confirmed by the author]** running Linux. The criterion rows are the figures logged during the build. The two rows marked "to be re-measured in phase B" are measured against the release Docker image with `scripts/measure-compute.sh`, which samples for 2 minutes and prints the median and p99.
 
 | What | Result | Build |
 |---|---|---|
@@ -328,10 +328,10 @@ Measured on the development machine, an AMD Ryzen 5 5500 (12 threads) running Li
 | 10,000 varied options (criterion) | 441 µs, 44.1 ns each, 22.7 million options a second | release |
 | Implied vol, near the money (criterion) | 160 ns | release |
 | Implied vol, deep out of the money (criterion) | 762 ns | release |
-| `compute_micros`, whole tick (285 live samples, 5 symbols) | median 199 µs, p99 278 µs | debug (`cargo run -p server`) |
-| VaR, all three methods together | 530–810 µs (delta-normal 3–5 µs, Monte Carlo 215–360 µs, historical 300–500 µs) | release |
+| `compute_micros`, whole tick, VaR included (5 symbols) | to be re-measured in phase B | release (Docker image) |
+| VaR `total_compute_micros`, all three methods, fresh ticks only | to be re-measured in phase B | release (Docker image) |
 
-A tick has a 250 ms budget, so the slowest sample used about a thousandth of it. VaR has a 1 ms budget. If its warm-up median is over budget it recomputes every 2 to 10 ticks. That never triggered on the sample book.
+A tick has a 250 ms budget and VaR has a 1 ms budget. If its warm-up median is over budget it recomputes every 2 to 10 ticks. That did not trigger in the Part 12 measurements.
 
 ## Local storage
 

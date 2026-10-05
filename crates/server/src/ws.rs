@@ -30,6 +30,7 @@ use thiserror::Error;
 use tokio::sync::{broadcast, watch};
 use tokio::time::Instant as TokioInstant;
 
+use crate::error::ApiError;
 use crate::state::AppState;
 
 /// Bumped only on a breaking change to this wire protocol.
@@ -95,9 +96,37 @@ enum ClientMessage {
     },
 }
 
+/// Most WebSocket clients (live and back-test together) served at once. Each costs a task and
+/// a small buffer, so the cap bounds memory when something opens connections in a loop. The
+/// check and the later increment are separate, so a burst can overshoot by a few; it is a
+/// guard rail, not an exact limit.
+pub const MAX_WS_CLIENTS: usize = 64;
+
+/// Refuses a new WebSocket client once [`MAX_WS_CLIENTS`] are connected.
+///
+/// # Errors
+///
+/// [`ApiError::TooManyRequests`] (429) when the cap is reached.
+pub fn check_capacity(clients: &AtomicUsize) -> Result<(), ApiError> {
+    if clients.load(Ordering::Relaxed) >= MAX_WS_CLIENTS {
+        return Err(ApiError::TooManyRequests(format!(
+            "{MAX_WS_CLIENTS} live-stream clients are already connected; close one and try again"
+        )));
+    }
+    Ok(())
+}
+
 /// `GET /ws`: upgrades the connection and streams the live engine.
-pub async fn handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| run(socket, state))
+///
+/// # Errors
+///
+/// [`ApiError::TooManyRequests`] when [`MAX_WS_CLIENTS`] are already connected.
+pub async fn handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> Result<Response, ApiError> {
+    check_capacity(&state.ws_clients)?;
+    Ok(ws.on_upgrade(move |socket| run(socket, state)))
 }
 
 /// Logs connect/disconnect and keeps [`AppState::ws_clients`] accurate across every
@@ -410,6 +439,17 @@ impl Throttle {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn capacity_check_refuses_at_the_cap() {
+        let clients = AtomicUsize::new(MAX_WS_CLIENTS - 1);
+        assert!(check_capacity(&clients).is_ok());
+        clients.store(MAX_WS_CLIENTS, Ordering::Relaxed);
+        assert!(matches!(
+            check_capacity(&clients),
+            Err(ApiError::TooManyRequests(_))
+        ));
+    }
+
     use std::collections::BTreeMap;
 
     use chrono::{NaiveDate, TimeZone, Utc};
