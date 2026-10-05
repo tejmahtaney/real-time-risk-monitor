@@ -16,11 +16,12 @@ use super::recorder::{self, BacktestRecord};
 use super::runner::{ControlCommand, Job, JobMessage, Progress, Shared};
 use super::saved::{self, SavedRun};
 use super::setup::{
-    BacktestConfig, CreateOptions, MAX_SPEED, MIN_SPEED, Prepared, RunInput, prepare,
+    BacktestConfig, CreateOptions, MAX_SPEED, MIN_SPEED, Prepared, RunInput, archive_coverage,
+    prepare,
 };
 use super::types::{
-    BACKTESTS_FOLDER, BacktestListItem, BacktestResults, BacktestRunState, BacktestSettings,
-    BacktestStatus,
+    ArchiveCoverage, BACKTESTS_FOLDER, BacktestListItem, BacktestResults, BacktestRunState,
+    BacktestSettings, BacktestStatus,
 };
 use crate::snapshot::RiskSnapshot;
 use risk::AlertEvent;
@@ -336,6 +337,18 @@ impl BacktestManager {
         } = saved::read_saved(&self.config.storage, id)?;
         let status = saved_status(&settings, &rows, summary.as_ref());
         Ok(assemble(status, settings, rows, events, summary))
+    }
+
+    /// The dates the merged local archive covers for the portfolio's symbols.
+    ///
+    /// # Errors
+    ///
+    /// [`BacktestError`] when the portfolio or the archive cannot be read.
+    pub async fn archive_coverage(&self) -> Result<ArchiveCoverage, BacktestError> {
+        let config = self.config.clone();
+        tokio::task::spawn_blocking(move || archive_coverage(&config))
+            .await
+            .map_err(|e| BacktestError::Internal(format!("the coverage task failed: {e}")))?
     }
 
     /// Every saved run, newest first, with runs in memory shown in their live state.

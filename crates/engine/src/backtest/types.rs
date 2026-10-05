@@ -217,3 +217,17 @@ pub struct BacktestResults {
     /// Breaches, rolls, settlements and corporate actions.
     pub events: Vec<BacktestEvent>,
 }
+
+/// `GET /api/backtests/archive-coverage`: what the merged local archive can replay.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
+pub struct ArchiveCoverage {
+    /// The first date with a price for every portfolio symbol. `None` when there are none.
+    pub first_date: Option<NaiveDate>,
+    /// The last such date.
+    pub last_date: Option<NaiveDate>,
+    /// How many dates have a price for every portfolio symbol.
+    pub aligned_dates: usize,
+    /// The portfolio symbols with no archived history, so no run can start until they are fetched.
+    pub missing_symbols: Vec<Symbol>,
+}

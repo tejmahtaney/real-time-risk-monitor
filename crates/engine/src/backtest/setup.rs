@@ -18,7 +18,9 @@ use storage::StorageRoot;
 
 use super::error::BacktestError;
 use super::roll::{SpecRoller, next_date};
-use super::types::{BacktestSettings, BacktestSource, BacktestSplitHandling, BacktestSplitNote};
+use super::types::{
+    ArchiveCoverage, BacktestSettings, BacktestSource, BacktestSplitHandling, BacktestSplitNote,
+};
 use crate::corporate::CorporateActionState;
 use crate::engine::Engine;
 use crate::recorder::git_commit;
@@ -323,4 +325,52 @@ fn window_actions(
         })
         .collect();
     Ok((calendar, notes, left_out.relative))
+}
+
+/// How many aligned dates the merged archive covers for the portfolio's symbols: the same merge
+/// and alignment ([`PriceTable::new`]) a run from the archive uses, without building a run.
+///
+/// # Errors
+///
+/// [`BacktestError`] for an unreadable portfolio or archive. Symbols with no archived history are
+/// reported in `missing_symbols`, not as an error; so is a table too short to align.
+pub(crate) fn archive_coverage(config: &BacktestConfig) -> Result<ArchiveCoverage, BacktestError> {
+    let specs = load_csv(&config.portfolio_path)?;
+    let symbols: Vec<Symbol> = specs
+        .iter()
+        .map(|spec| spec.underlying.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let archive = Archive::new(config.storage.clone());
+    let mut series = Vec::with_capacity(symbols.len());
+    let mut missing_symbols = Vec::new();
+    for symbol in &symbols {
+        let merged = archive.merged_history(symbol)?;
+        if merged.bars.is_empty() {
+            missing_symbols.push(symbol.clone());
+        } else {
+            series.push((symbol.clone(), merged.bars));
+        }
+    }
+    let empty = ArchiveCoverage {
+        first_date: None,
+        last_date: None,
+        aligned_dates: 0,
+        missing_symbols: missing_symbols.clone(),
+    };
+    if !missing_symbols.is_empty() {
+        return Ok(empty);
+    }
+    let raw = RawPrices::from_bars(series);
+    // A table that cannot be built (too few aligned dates) covers nothing a run could use.
+    let Ok(table) = PriceTable::new(&raw, &symbols) else {
+        return Ok(empty);
+    };
+    Ok(ArchiveCoverage {
+        first_date: table.dates().first().copied(),
+        last_date: table.end_date(),
+        aligned_dates: table.len(),
+        missing_symbols,
+    })
 }

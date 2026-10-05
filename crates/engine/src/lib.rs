@@ -13,11 +13,12 @@ mod recorder;
 mod snapshot;
 
 pub use backtest::{
-    BACKTESTS_FOLDER, BacktestConfig, BacktestError, BacktestEvent, BacktestListItem,
-    BacktestManager, BacktestResults, BacktestRollEvent, BacktestRunState, BacktestSettings,
-    BacktestSource, BacktestSplitHandling, BacktestSplitNote, BacktestStatus, BacktestSubscription,
-    ClientGuard, ControlCommand, CreateOptions, DAILY_FILE, DEFAULT_SPEED, EVENTS_FILE, INPUT_FILE,
-    MAX_SPEED, MIN_SPEED, RollPolicy, RunInput, SETTINGS_FILE, SUMMARY_FILE, SpecRoller,
+    ArchiveCoverage, BACKTESTS_FOLDER, BacktestConfig, BacktestError, BacktestEvent,
+    BacktestListItem, BacktestManager, BacktestResults, BacktestRollEvent, BacktestRunState,
+    BacktestSettings, BacktestSource, BacktestSplitHandling, BacktestSplitNote, BacktestStatus,
+    BacktestSubscription, ClientGuard, ControlCommand, CreateOptions, DAILY_FILE, DEFAULT_SPEED,
+    EVENTS_FILE, INPUT_FILE, MAX_SPEED, MIN_SPEED, RollPolicy, RunInput, SETTINGS_FILE,
+    SUMMARY_FILE, SpecRoller,
 };
 pub use command::{EngineCommand, EngineCommandError, EngineReply, EngineRequest};
 pub use corporate::{

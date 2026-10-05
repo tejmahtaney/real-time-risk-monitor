@@ -25,7 +25,7 @@ pub use roll::{BacktestRollEvent, RollPolicy, SpecRoller};
 pub use runner::ControlCommand;
 pub use setup::{BacktestConfig, CreateOptions, DEFAULT_SPEED, MAX_SPEED, MIN_SPEED, RunInput};
 pub use types::{
-    BACKTESTS_FOLDER, BacktestEvent, BacktestListItem, BacktestResults, BacktestRunState,
-    BacktestSettings, BacktestSource, BacktestSplitHandling, BacktestSplitNote, BacktestStatus,
-    DAILY_FILE, EVENTS_FILE, INPUT_FILE, SETTINGS_FILE, SUMMARY_FILE,
+    ArchiveCoverage, BACKTESTS_FOLDER, BacktestEvent, BacktestListItem, BacktestResults,
+    BacktestRunState, BacktestSettings, BacktestSource, BacktestSplitHandling, BacktestSplitNote,
+    BacktestStatus, DAILY_FILE, EVENTS_FILE, INPUT_FILE, SETTINGS_FILE, SUMMARY_FILE,
 };

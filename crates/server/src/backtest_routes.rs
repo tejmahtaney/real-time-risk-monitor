@@ -12,8 +12,8 @@ use axum::http::{StatusCode, header};
 use axum::response::Response;
 use axum::routing::{delete, get, post};
 use engine::{
-    BacktestListItem, BacktestResults, BacktestStatus, BacktestSubscription, ControlCommand,
-    CreateOptions, DEFAULT_SPEED, RunInput,
+    ArchiveCoverage, BacktestListItem, BacktestResults, BacktestStatus, BacktestSubscription,
+    ControlCommand, CreateOptions, DEFAULT_SPEED, RunInput,
 };
 use serde::Deserialize;
 
@@ -29,6 +29,7 @@ pub const MAX_UPLOAD_BYTES: usize = 5 * 1024 * 1024;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/backtests", get(list))
+        .route("/api/backtests/archive-coverage", get(archive_coverage))
         .route("/api/backtests/{id}", get(status).delete(stop))
         .route("/api/backtests/{id}/control", post(control))
         .route("/api/backtests/{id}/results", get(results))
@@ -208,6 +209,14 @@ fn json_rejection(rejection: &JsonRejection) -> ApiError {
 
 async fn list(State(state): State<AppState>) -> Result<Json<Vec<BacktestListItem>>, ApiError> {
     Ok(Json(state.backtests.list()?))
+}
+
+/// `GET /api/backtests/archive-coverage`: first date, last date and aligned date count of the
+/// merged archive, read-only.
+async fn archive_coverage(
+    State(state): State<AppState>,
+) -> Result<Json<ArchiveCoverage>, ApiError> {
+    Ok(Json(state.backtests.archive_coverage().await?))
 }
 
 async fn status(

@@ -438,3 +438,73 @@ async fn a_replay_streams_over_the_same_protocol_as_the_live_feed() {
     assert!(health["connected_ws_clients"].as_u64().unwrap() >= 1);
     shutdown.cancel();
 }
+
+/// Writes one archived download of `closes` (a day each from 5 January 2026) for `symbol`.
+fn archive_download(storage: &std::path::Path, symbol: &str, closes: usize) {
+    let mut series = Vec::new();
+    for day in 0..closes {
+        let date =
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 5).unwrap() + chrono::Days::new(day as u64);
+        series.push(format!(
+            r#""{date}":{{"1. open":"100","2. high":"100","3. low":"100","4. close":"{}","5. volume":"1"}}"#,
+            100.0 + day as f64
+        ));
+    }
+    let body = format!(
+        r#"{{"Meta Data":{{"1. Information":"Daily Prices"}},"Time Series (Daily)":{{{}}}}}"#,
+        series.join(",")
+    );
+    let record = json!({
+        "symbol": symbol,
+        "fetched_at": "2026-03-01T00:00:00Z",
+        "params": {"function": "TIME_SERIES_DAILY", "symbol": symbol, "outputsize": "compact", "datatype": "json"},
+        "body": body,
+    });
+    let folder = storage.join("market-data").join(symbol);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join("20260301T000000Z-daily.json"),
+        record.to_string(),
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn archive_coverage_reports_the_aligned_dates_and_changes_nothing() {
+    let (router, dir) = test_router();
+
+    // Nothing archived: zero dates, and the missing symbol is named.
+    let empty = json_body(
+        router
+            .clone()
+            .oneshot(get("/api/backtests/archive-coverage"))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(empty["aligned_dates"], 0);
+    assert_eq!(empty["first_date"], Value::Null);
+    assert_eq!(empty["missing_symbols"], json!(["SPY"]));
+
+    archive_download(dir.path(), "SPY", 45);
+    let response = router
+        .clone()
+        .oneshot(get("/api/backtests/archive-coverage"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let coverage = json_body(response).await;
+    assert_eq!(coverage["aligned_dates"], 45);
+    assert_eq!(coverage["first_date"], "2026-01-05");
+    assert_eq!(coverage["last_date"], "2026-02-18");
+    assert_eq!(coverage["missing_symbols"], json!([]));
+
+    // Read-only: no run was created, and `{id}` routing still works beside it.
+    let list = json_body(router.clone().oneshot(get("/api/backtests")).await.unwrap()).await;
+    assert_eq!(list, json!([]));
+    let response = router
+        .oneshot(get("/api/backtests/not-a-run"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
