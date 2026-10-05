@@ -303,3 +303,25 @@ Open issues: see the four Part 19 entries added above (OCC strike rounding, the 
 - **Power caveat.** With n = 80 there are only 0.8 expected exceptions at 99 %, so the test has almost no power: it rejects only from 4 exceptions, and a model whose true exception rate is 3 % is caught 22 % of the time (5 %: 57 %). The pass above is not evidence that the VaR is right. `low_power` is set on the result when fewer than 5 exceptions are expected.
 
 **Open issues.** Added above: whole-day residual, Kupiec power on short replays, close-only inputs, live limits on real history, replay `paused` and `change_since_open`. The Part 22 delete issue is updated.
+
+### Part 21 - Backtester frontend
+
+**Built.**
+- **Router.** `/` is the live dashboard, `/backtest` the backtester, with a Live and Backtest switch in the header (`ModeSwitch`, passed to `Header` as `nav`). The header stays live on both pages: replay progress and date come from `BacktestStatus`, shown in the replay view.
+- **Stream client** is now a factory, `createStreamClient({ source })`, one client per source (`/ws` or `/ws/backtests/{id}`). Only the live client bootstraps `/api/history`, polls and backfills. A backtest client reconnects only while `GET /api/backtests/{id}` says the run is in memory and unfinished (a 404 stops it). `startStream` and `stopStreamForTests` stay as the live singleton. The store is a factory too: `useRiskStore` (live) and `useBacktestStore`, so live data keeps streaming while a replay runs. Selectors and `useThrottledHistory` take an optional store.
+- **StrictMode.** `lib/runLease.ts`: unmount defers the `DELETE /api/backtests/{id}` by one task and a re-mount of the same run cancels it, so only a real route change frees the run. `pagehide` frees held runs with `fetch(..., { keepalive: true })`. Tested.
+- **Setup view:** drag-and-drop or file picker with the sample formats beside it, "Use archived real history" with the aligned date count, server errors (with line numbers) shown verbatim, saved runs newest first (source, dates, state, total P&L, unfinished marked), delete after typing the run id back.
+- **Replay view:** play, pause, step, run to end, 1 to 50 dates/s slider (debounced), progress bar and date from `BacktestStatus`, then risk tiles, a read-only positions table, P&L attribution and alerts from the backtest store. `PositionsTable` gained `readOnly` (no row menu), so a replay cannot edit the live book.
+- **Results view**, built only from `GET /results`: summary cards, cumulative P&L line over stacked bucket areas, drawdown chart, daily table with VaR exception days highlighted, CSV download. Kupiec result in plain words (`lib/varBacktest.ts`), with a low-power sentence under 250 days. Unfinished and partial runs say so.
+- **Backend (the one allowed change):** `GET /api/backtests/archive-coverage` returns first date, last date, aligned date count and any symbols with no archive. It reuses the run's own merge and `PriceTable` alignment, read-only. One server test; `ArchiveCoverage.ts` generated.
+- `frontend/scripts/screenshot.ts` also starts an archive run, runs it to the end and saves `backtest-results-<width>.png`.
+
+**New dependencies.** `react-router-dom` ^7.18 (client routes for `/` and `/backtest`; the Part 17 SPA fallback already serves `/backtest`). No new crates.
+
+**Tests.** 622 Rust tests and 208 frontend tests (30 new), all passing. fmt, clippy `-D warnings`, lint, typecheck and build clean.
+
+**Open issues.**
+- Part 21: no browser here, so the new page has not been seen. Run `npm run screenshot` (server and `npm run dev` running, at least one archived download) and look at `docs/screenshots/backtest-results-*.png`.
+- Part 21: no component shows `change_since_open`, so nothing needed hiding in replay. If a column for it is added later it must be blanked in replay, where it is always 0.
+- Part 21: leaving the page frees the run even when it is playing, so a replay cannot carry on in the background. Opening an in-memory run from the saved list shows its partial results only, not a reattached replay.
+- Part 22: side-by-side comparison of saved runs.

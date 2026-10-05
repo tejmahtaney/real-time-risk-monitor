@@ -1,6 +1,7 @@
 /**
  * Opens the running dashboard and saves full-page screenshots at 1,280 and
- * 1,920 pixels wide into `docs/screenshots/`, for visually checking a part's
+ * 1,920 pixels wide into `docs/screenshots/`, then starts a backtest on the archived
+ * history, runs it to the end and saves the results view as `backtest-results-<width>.png`, for visually checking a part's
  * work against `docs/ROADMAP.md`'s feature list. Part 24 reuses this script
  * unchanged for the demo recording, so it takes no part-specific arguments.
  *
@@ -26,6 +27,7 @@ const BASE_URL = process.env.RRM_BASE_URL ?? 'http://localhost:5173'
 const WIDTHS = [1280, 1920]
 const VIEWPORT_HEIGHT = 1080
 const READY_TIMEOUT_MS = 20_000
+const BACKTEST_TIMEOUT_MS = 120_000
 
 /** Waits for the dashboard's own "waiting for data" / "waiting for history"
  * placeholders (see `RiskTiles.tsx`, `GreeksCharts.tsx`) to clear, so the
@@ -48,6 +50,34 @@ async function waitForLiveData(page: Page): Promise<void> {
   }
 }
 
+/** Starts a run on the archived history, runs it to the end and waits for the results view.
+ * Needs at least one archived download (the app archives every fetch it makes). Logs a warning
+ * and screenshots whatever is showing if the run does not finish in time. */
+async function captureBacktestResults(page: Page, width: number): Promise<void> {
+  await page.goto(`${BASE_URL}/backtest`, { waitUntil: 'networkidle' })
+  const start = page.getByRole('button', { name: 'Use archived real history' })
+  try {
+    await start.waitFor({ state: 'visible', timeout: READY_TIMEOUT_MS })
+    await page.waitForFunction(() => !document.body.innerText.includes('Reading the archive'), {
+      timeout: READY_TIMEOUT_MS,
+    })
+    await start.click({ timeout: READY_TIMEOUT_MS })
+    await page.getByRole('button', { name: 'Run to end' }).click({ timeout: READY_TIMEOUT_MS })
+    await page
+      .getByTestId('results-view')
+      .waitFor({ state: 'visible', timeout: BACKTEST_TIMEOUT_MS })
+    // Let the charts finish laying out before the picture is taken.
+    await page.waitForTimeout(1_000)
+  } catch {
+    console.warn(
+      'screenshot: the backtest did not reach its results view; screenshotting what is showing.',
+    )
+  }
+  const outputPath = path.join(OUTPUT_DIR, `backtest-results-${width}.png`)
+  await page.screenshot({ path: outputPath, fullPage: true })
+  console.log(`screenshot: saved ${outputPath}`)
+}
+
 async function main(): Promise<void> {
   await mkdir(OUTPUT_DIR, { recursive: true })
   const browser = await chromium.launch()
@@ -59,6 +89,7 @@ async function main(): Promise<void> {
       const outputPath = path.join(OUTPUT_DIR, `dashboard-${width}.png`)
       await page.screenshot({ path: outputPath, fullPage: true })
       console.log(`screenshot: saved ${outputPath}`)
+      await captureBacktestResults(page, width)
       await page.close()
     }
   } finally {
