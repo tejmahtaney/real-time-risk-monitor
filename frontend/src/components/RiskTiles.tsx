@@ -57,23 +57,34 @@ const LIMITED_TILES: LimitedTileDef[] = [
     key: 'gross_exposure',
     label: 'Gross exposure',
     limitKind: 'gross_exposure',
-    tooltip: 'Sum of |dollar delta| across every underlying; offsetting positions do not hide each other.',
+    tooltip:
+      'Sum of |dollar delta| across every underlying; offsetting positions do not hide each other.',
     value: (t) => t.gross_exposure,
     format: formatCompactCurrency,
   },
 ]
 
-function LimitedTile({ def, totals, limits }: { def: LimitedTileDef; totals: PortfolioTotals; limits: LimitStatus[] }): ReactElement {
+function LimitedTile({
+  def,
+  totals,
+  limits,
+}: {
+  def: LimitedTileDef
+  totals: PortfolioTotals
+  limits: LimitStatus[]
+}): ReactElement {
   const value = def.value(totals)
   const limit = portfolioLimit(limits, def.limitKind)
   return (
     <div
-      className="flex flex-col gap-1 rounded-lg border border-border bg-surface-raised p-3"
+      className="flex min-w-0 flex-col gap-1 rounded-lg border border-border bg-surface-raised p-3"
       title={def.tooltip}
       data-testid={`tile-${def.key}`}
       data-state={limit?.state ?? 'ok'}
     >
-      <span className="whitespace-nowrap text-xs uppercase tracking-wide text-neutral">{def.label}</span>
+      <span className="truncate text-xs uppercase tracking-wide text-neutral" title={def.label}>
+        {def.label}
+      </span>
       <span className={`whitespace-nowrap text-lg font-semibold tabular-nums ${signColor(value)}`}>
         {def.format(value)}
       </span>
@@ -122,10 +133,7 @@ function VarHoverContent({ varReport }: { varReport: VarReport }): ReactElement 
       </thead>
       <tbody>
         {rows.map(({ method, report }) => (
-          <tr
-            key={method}
-            className={method === varReport.headline_method ? 'font-semibold' : ''}
-          >
+          <tr key={method} className={method === varReport.headline_method ? 'font-semibold' : ''}>
             <td className="whitespace-nowrap pr-2">{VAR_METHOD_LABEL[method]}</td>
             <td className="whitespace-nowrap px-2 text-right tabular-nums">
               {formatCompactCurrency(report.var_95)}
@@ -157,13 +165,20 @@ function VarTile({
   const headline = varReport === null ? null : headlineReport(varReport)
   return (
     <div
-      className="flex flex-col gap-1 rounded-lg border border-border bg-surface-raised p-3"
+      className="flex min-w-0 flex-col gap-1 rounded-lg border border-border bg-surface-raised p-3"
       data-testid="tile-var"
       data-state={limit?.state ?? 'ok'}
     >
-      <span className="whitespace-nowrap text-xs uppercase tracking-wide text-neutral">
-        VaR 99% {varReport && `(${VAR_METHOD_LABEL[varReport.headline_method]})`}
-      </span>
+      <span className="truncate text-xs uppercase tracking-wide text-neutral">VaR 99%</span>
+      {varReport && (
+        <span
+          className="truncate text-[10px] text-neutral"
+          title={VAR_METHOD_LABEL[varReport.headline_method]}
+          data-testid="var-method"
+        >
+          {VAR_METHOD_LABEL[varReport.headline_method]}
+        </span>
+      )}
       <HoverTable
         trigger={
           <span
@@ -230,21 +245,27 @@ export function RiskTiles({
             ))}
             <VarTile varReport={varReport} limits={limits} />
             <div
-              className="flex flex-col gap-1 rounded-lg border border-border bg-surface-raised p-3"
+              className="flex min-w-0 flex-col gap-1 rounded-lg border border-border bg-surface-raised p-3"
               title="Today's session P&L from full revaluation."
               data-testid="tile-pnl-today"
             >
-              <span className="text-xs uppercase tracking-wide text-neutral">Today&apos;s P&amp;L</span>
-              <span className={`whitespace-nowrap text-lg font-semibold tabular-nums ${signColor(pnlToday ?? 0)}`}>
+              <span className="truncate text-xs uppercase tracking-wide text-neutral">
+                Today&apos;s P&amp;L
+              </span>
+              <span
+                className={`whitespace-nowrap text-lg font-semibold tabular-nums ${signColor(pnlToday ?? 0)}`}
+              >
                 {pnlToday === null ? '—' : formatCompactCurrency(pnlToday)}
               </span>
             </div>
             <div
-              className="flex flex-col gap-1 rounded-lg border border-border bg-surface-raised p-3"
+              className="flex min-w-0 flex-col gap-1 rounded-lg border border-border bg-surface-raised p-3"
               title="Microseconds spent computing the last tick."
               data-testid="tile-compute-micros"
             >
-              <span className="text-xs uppercase tracking-wide text-neutral">Compute time</span>
+              <span className="truncate text-xs uppercase tracking-wide text-neutral">
+                Compute time
+              </span>
               <span className="whitespace-nowrap text-lg font-semibold tabular-nums">
                 {computeMicros === null ? '—' : formatMicros(computeMicros)}
               </span>

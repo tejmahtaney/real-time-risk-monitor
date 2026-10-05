@@ -9,7 +9,7 @@ const FILL: Record<UsageLevel, string> = {
   over: 'bg-breach',
 }
 
-/** Storage use as a bar against the limit, then one thinner bar per folder on the same scale.
+/** Storage use as a bar against the limit, then one thinner bar per folder, scaled to the largest folder.
  * The fill turns amber at the warning level and red above the limit. The storage path is shown
  * under it. */
 export function UsageBar({ usage }: { usage: StorageUsageResponse }): ReactElement {
@@ -17,6 +17,9 @@ export function UsageBar({ usage }: { usage: StorageUsageResponse }): ReactEleme
   const share = (bytes: number): number =>
     usage.limit_bytes > 0 ? Math.min(100, (bytes / usage.limit_bytes) * 100) : 0
   const folders = Object.entries(usage.usage_bytes).sort((a, b) => b[1] - a[1])
+  // Folder bars use the largest folder as full width, so small stores still show their split.
+  const largest = folders[0]?.[1] ?? 0
+  const folderShare = (bytes: number): number => (largest > 0 ? (bytes / largest) * 100 : 0)
   return (
     <section
       aria-label="Storage usage"
@@ -29,7 +32,11 @@ export function UsageBar({ usage }: { usage: StorageUsageResponse }): ReactEleme
             {formatBytes(usage.total_bytes)} of {formatBytes(usage.limit_bytes)}
           </span>
           <span data-testid="usage-level" data-level={level} className="text-neutral">
-            {level === 'ok' ? 'within limit' : level === 'warning' ? 'warning level reached' : 'over the limit'}
+            {level === 'ok'
+              ? 'within limit'
+              : level === 'warning'
+                ? 'warning level reached'
+                : 'over the limit'}
           </span>
         </div>
         <div
@@ -55,10 +62,17 @@ export function UsageBar({ usage }: { usage: StorageUsageResponse }): ReactEleme
       </div>
       <ul className="flex flex-col gap-1">
         {folders.map(([folder, bytes]) => (
-          <li key={folder} className="grid grid-cols-[8rem_1fr_5rem] items-center gap-2 text-xs tabular-nums">
+          <li
+            key={folder}
+            className="grid grid-cols-[8rem_1fr_5rem] items-center gap-2 text-xs tabular-nums"
+          >
             <span className="truncate">{folder}</span>
             <div className="h-2 overflow-hidden rounded bg-surface">
-              <div className={`h-full ${FILL[level]} opacity-70`} style={{ width: `${share(bytes)}%` }} />
+              <div
+                data-testid="folder-fill"
+                className={`h-full ${FILL[level]} opacity-70`}
+                style={{ width: `${folderShare(bytes)}%` }}
+              />
             </div>
             <span className="text-right text-neutral">{formatBytes(bytes)}</span>
           </li>

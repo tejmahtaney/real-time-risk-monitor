@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import type { HistoryPoint } from '../api/generated/HistoryPoint'
+import type { SessionEvent } from '../api/generated/SessionEvent'
 import type { SessionSummary } from '../api/generated/SessionSummary'
 import {
   alignSessions,
   cumulativePnl,
+  describeEvent,
   newestFirst,
   rangeBounds,
   sessionDates,
@@ -135,5 +137,36 @@ describe('alignSessions', () => {
   it('handles an empty session', () => {
     expect(alignSessions([], [point('2026-09-28T14:00:00Z', 1)], 'vega')).toHaveLength(1)
     expect(alignSessions([], [], 'vega')).toEqual([])
+  })
+})
+
+describe('describeEvent', () => {
+  const alert = (
+    scope: SessionEvent & { type: 'alert' } extends infer A
+      ? A extends { scope: infer S }
+        ? S
+        : never
+      : never,
+  ): SessionEvent => ({
+    type: 'alert',
+    id: 1,
+    wall_time: '2026-10-01T13:00:00Z',
+    sim_time: '2026-10-01T13:00:00Z',
+    name: 'underlying_dollar_delta',
+    scope,
+    from: 'ok',
+    to: 'breach',
+    value: 1.2345e6,
+    limit: 1e6,
+  })
+
+  it('uses the alerts pane labels and money format, never scientific notation', () => {
+    const text = describeEvent(alert({ kind: 'portfolio' }))
+    expect(text).toBe('Underlying $ delta (Portfolio) ok → breach, $1.2M / $1.0M')
+    expect(text).not.toMatch(/e[+-]?\d/)
+  })
+
+  it('shows the symbol for a per-underlying limit', () => {
+    expect(describeEvent(alert({ kind: 'underlying', symbol: 'AAPL' }))).toContain('(AAPL)')
   })
 })

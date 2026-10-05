@@ -1,5 +1,15 @@
 import { useMemo, useState, type ReactElement } from 'react'
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from 'recharts'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+  type TooltipContentProps,
+} from 'recharts'
 
 import type { PnlBuckets } from '../api/generated/PnlBuckets'
 import type { PnlReport } from '../api/generated/PnlReport'
@@ -9,6 +19,7 @@ import { buildHeadline } from '../lib/headline'
 import {
   PNL_PERIODS,
   STACK_KEYS,
+  bucketChartHeight,
   bucketRows,
   portfolioBucketsForPeriod,
   underlyingStacks,
@@ -63,7 +74,13 @@ function AttributionTooltip({ active, payload }: TooltipContentProps): ReactElem
 /** The P&L attribution panel: the plain-English headline (from today's buckets),
  * a horizontal bar per bucket for the chosen period, and a small per-underlying
  * stacked breakdown. Reads only its `pnl` prop, never the store directly. */
-export function PnlAttributionPanel({ pnl, className = '' }: { pnl: PnlReport | null; className?: string }): ReactElement {
+export function PnlAttributionPanel({
+  pnl,
+  className = '',
+}: {
+  pnl: PnlReport | null
+  className?: string
+}): ReactElement {
   const [period, setPeriod] = useState<PnlPeriod>('today')
 
   const buckets = pnl ? portfolioBucketsForPeriod(pnl, period) : null
@@ -77,7 +94,9 @@ export function PnlAttributionPanel({ pnl, className = '' }: { pnl: PnlReport | 
       aria-label="P&L attribution"
     >
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral">P&amp;L attribution</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral">
+          P&amp;L attribution
+        </h2>
         <div className="flex gap-1" role="group" aria-label="Period">
           {PNL_PERIODS.map((p) => (
             <button
@@ -86,7 +105,9 @@ export function PnlAttributionPanel({ pnl, className = '' }: { pnl: PnlReport | 
               onClick={() => setPeriod(p)}
               aria-pressed={period === p}
               className={`rounded px-2 py-1 text-xs ${
-                period === p ? 'bg-surface font-semibold text-neutral' : 'text-neutral hover:bg-surface'
+                period === p
+                  ? 'bg-surface font-semibold text-neutral'
+                  : 'text-neutral hover:bg-surface'
               }`}
             >
               {PERIOD_LABEL[p]}
@@ -100,14 +121,32 @@ export function PnlAttributionPanel({ pnl, className = '' }: { pnl: PnlReport | 
       </p>
 
       {rows.length === 0 ? (
-        <p className="text-sm text-neutral">No P&amp;L data for {PERIOD_LABEL[period].toLowerCase()} yet.</p>
+        <p className="text-sm text-neutral">
+          No P&amp;L data for {PERIOD_LABEL[period].toLowerCase()} yet.
+        </p>
       ) : (
         <>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={rows} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
+          <ResponsiveContainer width="100%" height={bucketChartHeight(rows.length)}>
+            <BarChart
+              data={rows}
+              layout="vertical"
+              margin={{ top: 4, right: 16, bottom: 4, left: 4 }}
+            >
               <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
-              <XAxis type="number" stroke={CHART_AXIS} tick={{ fontSize: 10 }} tickFormatter={formatCompactCurrency} />
-              <YAxis type="category" dataKey="label" stroke={CHART_AXIS} tick={{ fontSize: 11 }} width={78} />
+              <XAxis
+                type="number"
+                stroke={CHART_AXIS}
+                tick={{ fontSize: 10 }}
+                tickFormatter={formatCompactCurrency}
+              />
+              <YAxis
+                type="category"
+                dataKey="label"
+                stroke={CHART_AXIS}
+                tick={{ fontSize: 11 }}
+                width={78}
+                interval={0}
+              />
               <Tooltip content={AttributionTooltip} cursor={{ fill: 'transparent' }} />
               <Bar dataKey="value" isAnimationActive={false}>
                 {rows.map((row) => (
@@ -119,7 +158,9 @@ export function PnlAttributionPanel({ pnl, className = '' }: { pnl: PnlReport | 
 
           {stacks.length > 0 && (
             <div className="flex flex-col gap-1">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral">By underlying</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral">
+                By underlying
+              </h3>
               <ResponsiveContainer width="100%" height={Math.max(100, stacks.length * 32)}>
                 <BarChart
                   data={stacks.map((s) => ({ symbol: s.symbol, ...s.values }))}
@@ -127,7 +168,12 @@ export function PnlAttributionPanel({ pnl, className = '' }: { pnl: PnlReport | 
                   margin={{ top: 4, right: 16, bottom: 4, left: 4 }}
                 >
                   <CartesianGrid stroke={CHART_GRID} strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" stroke={CHART_AXIS} tick={{ fontSize: 10 }} tickFormatter={formatCompactCurrency} />
+                  <XAxis
+                    type="number"
+                    stroke={CHART_AXIS}
+                    tick={{ fontSize: 10 }}
+                    tickFormatter={formatCompactCurrency}
+                  />
                   <YAxis
                     type="category"
                     dataKey="symbol"
@@ -137,8 +183,15 @@ export function PnlAttributionPanel({ pnl, className = '' }: { pnl: PnlReport | 
                     interval={0}
                   />
                   <Tooltip
-                    formatter={(value, name) => [formatCompactCurrency(Number(value)), String(name)]}
-                    contentStyle={{ backgroundColor: CHART_TOOLTIP_BG, border: `1px solid ${CHART_TOOLTIP_BORDER}`, fontSize: 12 }}
+                    formatter={(value, name) => [
+                      formatCompactCurrency(Number(value)),
+                      String(name),
+                    ]}
+                    contentStyle={{
+                      backgroundColor: CHART_TOOLTIP_BG,
+                      border: `1px solid ${CHART_TOOLTIP_BORDER}`,
+                      fontSize: 12,
+                    }}
                   />
                   {STACK_KEYS.map((key) => (
                     <Bar key={key} dataKey={key} stackId="pnl" isAnimationActive={false}>

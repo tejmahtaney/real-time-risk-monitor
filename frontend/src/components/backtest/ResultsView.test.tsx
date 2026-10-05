@@ -86,6 +86,11 @@ describe('ResultsView', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
+  it('keeps the minus sign on the same line as its number', () => {
+    render(<ResultsView results={results(false, 'finished')} />)
+    expect(screen.getByText('−$800')).toHaveClass('whitespace-nowrap')
+  })
+
   it('marks an unfinished run as covering only the dates it replayed', () => {
     render(<ResultsView results={results(true, 'unfinished')} />)
     expect(screen.getByRole('status')).toHaveTextContent(

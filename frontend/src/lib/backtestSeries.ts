@@ -40,6 +40,52 @@ export function cumulativeSeries(rows: DailyRow[]): CumulativePoint[] {
   })
 }
 
+/** The data key of a bucket's positive part in a {@link StackedPoint}. */
+export function posKey(key: BucketKey): `${BucketKey}_pos` {
+  return `${key}_pos`
+}
+
+/** The data key of a bucket's negative part in a {@link StackedPoint}. */
+export function negKey(key: BucketKey): `${BucketKey}_neg` {
+  return `${key}_neg`
+}
+
+/** A {@link CumulativePoint} with each bucket split into its positive and negative part. */
+export type StackedPoint = CumulativePoint & Record<`${BucketKey}_pos` | `${BucketKey}_neg`, number>
+
+/** Cumulative points ready for sign-aware stacking: positive buckets stack upwards from zero in
+ * one stack and negative buckets stack downwards in another, so offsetting buckets do not
+ * inflate the chart beyond the data. */
+export function stackedSeries(rows: DailyRow[]): StackedPoint[] {
+  return cumulativeSeries(rows).map((point) => {
+    const parts: Record<string, number> = {}
+    for (const { key } of BUCKET_SERIES) {
+      parts[posKey(key)] = Math.max(point[key], 0)
+      parts[negKey(key)] = Math.min(point[key], 0)
+    }
+    return { ...point, ...parts } as StackedPoint
+  })
+}
+
+/** The Y axis range `[min, max]` that fits the positive stack, the negative stack and the
+ * cumulative line, with 5 % headroom, always including zero. */
+export function stackedDomain(points: StackedPoint[]): [number, number] {
+  let lo = 0
+  let hi = 0
+  for (const point of points) {
+    let up = 0
+    let down = 0
+    for (const { key } of BUCKET_SERIES) {
+      up += point[posKey(key)]
+      down += point[negKey(key)]
+    }
+    hi = Math.max(hi, up, point.total)
+    lo = Math.min(lo, down, point.total)
+  }
+  const pad = (hi - lo) * 0.05
+  return [lo === 0 ? 0 : lo - pad, hi === 0 ? 0 : hi + pad]
+}
+
 /** One date of the drawdown chart. `drawdown` is zero or negative: how far the cumulative P&L
  * is below its running peak, with the start counted as a peak of zero. */
 export interface DrawdownPoint {

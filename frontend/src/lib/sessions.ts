@@ -3,6 +3,7 @@ import type { HistoryPoint } from '../api/generated/HistoryPoint'
 import type { SessionEvent } from '../api/generated/SessionEvent'
 import type { SessionSummary } from '../api/generated/SessionSummary'
 import { formatCompactCurrency, formatSimTime } from './format'
+import { limitLabel, scopeLabel } from './limits'
 import { formatBytes } from './usage'
 
 /** One session as the table shows it. */
@@ -116,7 +117,7 @@ export function eventTime(event: SessionEvent): string {
 export function describeEvent(event: SessionEvent): string {
   switch (event.type) {
     case 'alert':
-      return `${event.name} ${event.from} → ${event.to} (${event.value.toPrecision(4)} against ${event.limit.toPrecision(4)})`
+      return `${limitLabel(event.name)} (${scopeLabel(event.scope)}) ${event.from} → ${event.to}, ${formatCompactCurrency(event.value)} / ${formatCompactCurrency(event.limit)}`
     case 'settlement':
       return `${event.description} settled at ${event.spot.toFixed(2)}, realised ${formatCompactCurrency(event.realised_pnl)}`
     case 'position_change':

@@ -156,3 +156,13 @@ describe('PositionsTable status display', () => {
     expect(screen.getByTestId('position-row')).toHaveAttribute('title', 'missing underlying')
   })
 })
+
+describe('PositionsTable narrow screens', () => {
+  it('scrolls sideways instead of clipping columns', () => {
+    render(<PositionsTable positions={[position({ id: 'a' })]} />)
+    const table = screen.getByRole('table')
+    expect(table).toHaveClass('min-w-max')
+    expect(table.parentElement).toHaveClass('overflow-x-auto')
+    expect(screen.getAllByRole('columnheader').length).toBeGreaterThanOrEqual(12)
+  })
+})

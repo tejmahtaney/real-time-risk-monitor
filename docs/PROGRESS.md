@@ -343,3 +343,7 @@ Open issues: see the four Part 19 entries added above (OCC strike rounding, the 
 - Part 22: the session comparison's cumulative P&L adds `pnl_today.actual` across New York dates, since history points only carry the current day's bucket. A session that restarts inside one simulated day is not detected.
 - Part 22: the screenshot script has not been run here (no browser). Run `npm run screenshot` in `frontend/` with the server and `npm run dev` up.
 - Part 22: deleting sessions, market data and portfolio versions is still not built (see the earlier Part 22 issue above). This part adds no delete.
+
+## Part 22 fixes
+
+Added the missing `react-router-dom` dependency (^7.18; clean `npm ci`, typecheck and build verified). Option descriptions now show strikes to at most 2 decimals (stored strike unchanged). Risk tile labels truncate and the VaR tile shows its method on a separate line. The P&L attribution chart labels all nine buckets. The backtest cumulative chart stacks sign-aware with a bold cumulative line and a data-scaled axis. Session events reuse the alerts pane labels, money format and symbol. Data page folder bars scale to the largest folder. Backtest card money no longer wraps at the minus sign. Positions table already scrolls sideways (test added). New dependencies: `react-router-dom`. Tests: 631 Rust, 244 frontend. Open issues: none new.

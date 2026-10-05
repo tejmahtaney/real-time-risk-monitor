@@ -30,4 +30,16 @@ describe('UsageBar', () => {
     expect(screen.getByText('/data/storage')).toBeInTheDocument()
     expect(screen.getByTestId('usage-fill')).toHaveStyle({ width: '100%' })
   })
+
+  it('scales folder bars to the largest folder while the top bar stays against the limit', () => {
+    const small: StorageUsageResponse = {
+      ...usage(150),
+      usage_bytes: { sessions: 100, 'market-data': 50 },
+    }
+    render(<UsageBar usage={small} />)
+    const [largest, half] = screen.getAllByTestId('folder-fill')
+    expect(largest).toHaveStyle({ width: '100%' })
+    expect(half).toHaveStyle({ width: '50%' })
+    expect(screen.getByTestId('usage-fill')).toHaveStyle({ width: '15%' })
+  })
 })

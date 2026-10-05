@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { LimitStatus } from '../api/generated/LimitStatus'
@@ -63,7 +63,9 @@ function varReport(overrides: Partial<VarReport> = {}): VarReport {
 
 describe('RiskTiles', () => {
   it('shows a waiting message with no totals yet', () => {
-    render(<RiskTiles totals={null} limits={[]} pnlToday={null} computeMicros={null} varReport={null} />)
+    render(
+      <RiskTiles totals={null} limits={[]} pnlToday={null} computeMicros={null} varReport={null} />,
+    )
     expect(screen.getByText(/waiting for data/i)).toBeInTheDocument()
   })
 
@@ -75,7 +77,9 @@ describe('RiskTiles', () => {
     render(
       <RiskTiles
         totals={totals()}
-        limits={[limit({ state, utilisation: state === 'ok' ? 0.2 : state === 'warning' ? 0.85 : 1.1 })]}
+        limits={[
+          limit({ state, utilisation: state === 'ok' ? 0.2 : state === 'warning' ? 0.85 : 1.1 }),
+        ]}
         pnlToday={500}
         computeMicros={1200}
         varReport={null}
@@ -88,41 +92,85 @@ describe('RiskTiles', () => {
   })
 
   it('shows a tile with no limit bar when the limit is not configured', () => {
-    render(<RiskTiles totals={totals()} limits={[]} pnlToday={0} computeMicros={100} varReport={null} />)
+    render(
+      <RiskTiles totals={totals()} limits={[]} pnlToday={0} computeMicros={100} varReport={null} />,
+    )
     const tile = screen.getByTestId('tile-dollar_delta')
     expect(tile.querySelector('.bg-up, .bg-warning, .bg-breach')).toBeNull()
   })
 
   it("renders today's P&L and compute_micros tiles, which are never limited", () => {
-    render(<RiskTiles totals={totals()} limits={[]} pnlToday={-250} computeMicros={850} varReport={null} />)
+    render(
+      <RiskTiles
+        totals={totals()}
+        limits={[]}
+        pnlToday={-250}
+        computeMicros={850}
+        varReport={null}
+      />,
+    )
     expect(screen.getByTestId('tile-pnl-today')).toHaveTextContent('$250')
     expect(screen.getByTestId('tile-compute-micros')).toHaveTextContent('850 µs')
   })
 
   it('shows a placeholder in the VaR tile before the first VarReport arrives', () => {
-    render(<RiskTiles totals={totals()} limits={[]} pnlToday={0} computeMicros={100} varReport={null} />)
+    render(
+      <RiskTiles totals={totals()} limits={[]} pnlToday={0} computeMicros={100} varReport={null} />,
+    )
     const tile = screen.getByTestId('tile-var')
     expect(tile).toHaveTextContent('—')
   })
 
   it("shows the headline method's VaR99 and label", () => {
     render(
-      <RiskTiles totals={totals()} limits={[]} pnlToday={0} computeMicros={100} varReport={varReport()} />,
+      <RiskTiles
+        totals={totals()}
+        limits={[]}
+        pnlToday={0}
+        computeMicros={100}
+        varReport={varReport()}
+      />,
     )
     const tile = screen.getByTestId('tile-var')
     expect(tile).toHaveTextContent('$15.0k')
-    expect(tile).toHaveTextContent('Delta-gamma Monte Carlo')
+    expect(tile).toHaveTextContent('VaR 99%')
+    expect(screen.getByTestId('var-method')).toHaveTextContent('Delta-gamma Monte Carlo')
+  })
+
+  it('truncates every tile label so it cannot overflow its tile', () => {
+    render(
+      <RiskTiles
+        totals={totals()}
+        limits={[]}
+        pnlToday={0}
+        computeMicros={100}
+        varReport={varReport()}
+      />,
+    )
+    for (const id of ['tile-gross_exposure', 'tile-var', 'tile-pnl-today', 'tile-compute-micros']) {
+      const tile = screen.getByTestId(id)
+      expect(tile).toHaveClass('min-w-0')
+      const label = tile.querySelector('span')
+      expect(label).toHaveClass('truncate')
+      expect(label).not.toHaveClass('whitespace-nowrap')
+    }
   })
 
   it('shows all three methods in the hover table, with the headline row bold', () => {
     render(
-      <RiskTiles totals={totals()} limits={[]} pnlToday={0} computeMicros={100} varReport={varReport()} />,
+      <RiskTiles
+        totals={totals()}
+        limits={[]}
+        pnlToday={0}
+        computeMicros={100}
+        varReport={varReport()}
+      />,
     )
     const table = screen.getByTestId('var-hover-table')
     expect(table).toHaveTextContent('Delta-normal')
     expect(table).toHaveTextContent('Delta-gamma Monte Carlo')
     expect(table).toHaveTextContent('Historical simulation')
-    const headlineRow = screen.getByText('Delta-gamma Monte Carlo').closest('tr')
+    const headlineRow = within(table).getByText('Delta-gamma Monte Carlo').closest('tr')
     expect(headlineRow).toHaveClass('font-semibold')
   })
 
@@ -130,7 +178,9 @@ describe('RiskTiles', () => {
     render(
       <RiskTiles
         totals={totals()}
-        limits={[limit({ name: 'portfolio_var99', state: 'breach', utilisation: 1.2, limit: 12_500 })]}
+        limits={[
+          limit({ name: 'portfolio_var99', state: 'breach', utilisation: 1.2, limit: 12_500 }),
+        ]}
         pnlToday={0}
         computeMicros={100}
         varReport={varReport()}

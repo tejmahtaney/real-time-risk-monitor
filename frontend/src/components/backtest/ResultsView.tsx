@@ -8,16 +8,23 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  type TooltipContentProps,
 } from 'recharts'
 
 import type { BacktestResults } from '../../api/generated/BacktestResults'
 import type { DailyRow } from '../../api/generated/DailyRow'
-import { BUCKET_SERIES, cumulativeSeries, drawdownSeries } from '../../lib/backtestSeries'
+import {
+  BUCKET_SERIES,
+  drawdownSeries,
+  negKey,
+  posKey,
+  stackedDomain,
+  stackedSeries,
+} from '../../lib/backtestSeries'
 import { dailyRowsToCsv, downloadText } from '../../lib/backtestCsv'
 import {
   CHART_AXIS,
   CHART_GRID,
-  CHART_LINE,
   CHART_TOOLTIP_BG,
   CHART_TOOLTIP_BORDER,
 } from '../../lib/chartTheme'
@@ -30,6 +37,24 @@ const TOOLTIP_STYLE = {
   fontSize: 12,
 }
 const DRAWDOWN_COLOR = '#f87171'
+/** The cumulative P&L line: near white, so it stands apart from every bucket colour. */
+const CUMULATIVE_LINE = '#f9fafb'
+
+/** Tooltip for the cumulative chart: skips the zero half of each split bucket. */
+function CumulativeTooltip({ active, payload, label }: TooltipContentProps): ReactElement | null {
+  if (!active) return null
+  const entries = payload.filter((entry) => Number(entry.value) !== 0)
+  return (
+    <div className="rounded border text-xs" style={{ ...TOOLTIP_STYLE, padding: 8 }}>
+      <div className="font-medium">{label}</div>
+      {entries.map((entry) => (
+        <div key={String(entry.dataKey)} className="tabular-nums" style={{ color: entry.color }}>
+          {entry.name}: {formatCompactCurrency(Number(entry.value))}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function Card({ label, children }: { label: string; children: React.ReactNode }): ReactElement {
   return (
@@ -42,7 +67,7 @@ function Card({ label, children }: { label: string; children: React.ReactNode })
 
 function Money({ value }: { value: number }): ReactElement {
   return (
-    <span className={`text-lg font-semibold tabular-nums ${signColor(value)}`}>
+    <span className={`whitespace-nowrap text-lg font-semibold tabular-nums ${signColor(value)}`}>
       {formatCompactCurrency(value)}
     </span>
   )
@@ -103,7 +128,7 @@ export function SummaryCards({ results }: { results: BacktestResults }): ReactEl
           {BUCKET_SERIES.map(({ key, label }) => (
             <li key={key} className="flex justify-between gap-2">
               <span className="text-neutral">{label}</span>
-              <span className={signColor(summary.total[key])}>
+              <span className={`whitespace-nowrap ${signColor(summary.total[key])}`}>
                 {formatCompactCurrency(summary.total[key])}
               </span>
             </li>
@@ -115,7 +140,8 @@ export function SummaryCards({ results }: { results: BacktestResults }): ReactEl
 }
 
 function CumulativeChart({ rows }: { rows: DailyRow[] }): ReactElement {
-  const data = useMemo(() => cumulativeSeries(rows), [rows])
+  const data = useMemo(() => stackedSeries(rows), [rows])
+  const domain = useMemo(() => stackedDomain(data), [data])
   return (
     <section
       aria-label="Cumulative P&L"
@@ -132,31 +158,45 @@ function CumulativeChart({ rows }: { rows: DailyRow[] }): ReactElement {
             stroke={CHART_AXIS}
             tick={{ fontSize: 10 }}
             width={60}
+            domain={domain}
+            allowDataOverflow
             tickFormatter={(value) => formatCompactCurrency(Number(value))}
           />
-          <Tooltip
-            contentStyle={TOOLTIP_STYLE}
-            formatter={(value) => formatCompactCurrency(Number(value))}
-          />
+          <Tooltip content={CumulativeTooltip} />
           {BUCKET_SERIES.map(({ key, label, color }) => (
             <Area
-              key={key}
+              key={posKey(key)}
               type="monotone"
-              dataKey={key}
+              dataKey={posKey(key)}
               name={label}
-              stackId="buckets"
+              stackId="positive"
               stroke={color}
               fill={color}
               fillOpacity={0.35}
               isAnimationActive={false}
+              legendType="none"
+            />
+          ))}
+          {BUCKET_SERIES.map(({ key, label, color }) => (
+            <Area
+              key={negKey(key)}
+              type="monotone"
+              dataKey={negKey(key)}
+              name={label}
+              stackId="negative"
+              stroke={color}
+              fill={color}
+              fillOpacity={0.35}
+              isAnimationActive={false}
+              legendType="none"
             />
           ))}
           <Line
             type="monotone"
             dataKey="total"
             name="Cumulative P&L"
-            stroke={CHART_LINE}
-            strokeWidth={2}
+            stroke={CUMULATIVE_LINE}
+            strokeWidth={3.5}
             dot={false}
             isAnimationActive={false}
           />

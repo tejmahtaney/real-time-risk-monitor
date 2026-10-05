@@ -90,3 +90,13 @@ function mapValues<T, U>(record: Record<string, T>, fn: (value: T) => U): Record
   for (const [key, value] of Object.entries(record)) result[key] = fn(value)
   return result
 }
+
+/** Pixels per bucket row in the attribution chart, enough for one label each. */
+const BUCKET_ROW_HEIGHT = 28
+/** Space for the chart's value axis and margins. */
+const BUCKET_CHART_PADDING = 40
+
+/** Chart height that gives every bucket its own labelled row (nine buckets now). */
+export function bucketChartHeight(rowCount: number): number {
+  return Math.max(220, rowCount * BUCKET_ROW_HEIGHT + BUCKET_CHART_PADDING)
+}

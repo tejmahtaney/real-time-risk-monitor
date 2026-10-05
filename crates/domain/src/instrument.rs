@@ -186,10 +186,22 @@ impl Instrument {
                     OptionType::Call => 'C',
                     OptionType::Put => 'P',
                 };
-                format!("{} {} {} {}", c.underlying, c.expiry, letter, c.strike)
+                format!(
+                    "{} {} {} {}",
+                    c.underlying,
+                    c.expiry,
+                    letter,
+                    format_strike(c.strike)
+                )
             }
         }
     }
+}
+
+/// Formats a strike with at most two decimals and no trailing zeros, for display only.
+fn format_strike(strike: f64) -> String {
+    let text = format!("{strike:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 #[cfg(test)]
@@ -293,6 +305,19 @@ mod tests {
             Instrument::Equity { symbol: sym("SPY") }.description(),
             "SPY"
         );
+    }
+
+    #[test]
+    fn description_rounds_adjusted_strikes_but_keeps_exact_value() {
+        let strike = 113.476_190_476_190_48;
+        let option = Instrument::Option(contract(OptionType::Call, strike, date(2026, 10, 16)));
+        assert_eq!(option.description(), "AAPL 2026-10-16 C 113.48");
+        let Instrument::Option(c) = &option else {
+            return;
+        };
+        assert_eq!(c.strike.to_bits(), strike.to_bits());
+        let round = Instrument::Option(contract(OptionType::Put, 100.001, date(2026, 10, 16)));
+        assert_eq!(round.description(), "AAPL 2026-10-16 P 100");
     }
 
     #[test]
