@@ -106,13 +106,29 @@ async fn list_sessions(
         let Some(id) = dir.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        let meta: SessionMeta = engine::read_json(&dir.join("meta.json"))?;
+        // One session written by an older build (or cut off mid-write) must not hide the
+        // others, so an unreadable meta skips the session and an unreadable close only
+        // leaves its total P&L empty.
+        let meta: SessionMeta = match engine::read_json(&dir.join("meta.json")) {
+            Ok(meta) => meta,
+            Err(error) => {
+                tracing::warn!(session = id, %error, "skipping a session with an unreadable meta.json");
+                continue;
+            }
+        };
         let closes = engine::list(&dir.join("closes"))?;
-        let total_pnl = closes
-            .last()
-            .map(|path| engine::read_json::<RiskSnapshot>(path))
-            .transpose()?
-            .map(|snapshot| snapshot.pnl.portfolio.since_start.actual);
+        let total_pnl = closes.last().and_then(|path| {
+            match engine::read_json::<RiskSnapshot>(path) {
+                Ok(snapshot) => Some(snapshot.pnl.portfolio.since_start.actual),
+                Err(error) => {
+                    // An older close that no longer parses: the daily P&L file holds the same
+                    // total as one row per day, so fall back to that sum.
+                    tracing::warn!(session = id, %error, "last close is unreadable; using daily-pnl.csv");
+                    let rows = read_daily_pnl_csv(&dir.join("daily-pnl.csv"));
+                    (!rows.is_empty()).then(|| rows.iter().map(|row| row.actual).sum())
+                }
+            }
+        });
         out.push(SessionSummary {
             id: id.to_owned(),
             start: meta.start,

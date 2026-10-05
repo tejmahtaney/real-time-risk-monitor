@@ -383,3 +383,46 @@ async fn archive_coverage_lists_each_symbols_merged_dates() {
         json!([{"symbol": "SPY", "first_date": "2026-02-25", "last_date": "2026-02-27", "dates": 3}])
     );
 }
+
+#[tokio::test]
+async fn one_unreadable_session_does_not_hide_the_others() {
+    let (router, dir) = test_router();
+    let meta = |id: &str, end: serde_json::Value| {
+        let folder = dir.path().join("sessions").join(id);
+        std::fs::create_dir_all(folder.join("closes")).unwrap();
+        std::fs::write(
+            folder.join("meta.json"),
+            json!({
+                "session_id": id, "start": "2026-09-28T12:00:00Z", "end": end, "seed": 1,
+                "speed": 1.0, "git_commit": "abcdef1234", "dropped_records": 0
+            })
+            .to_string(),
+        )
+        .unwrap();
+        folder
+    };
+    // An old build's close file, missing fields the current snapshot needs.
+    let old = meta("old", json!(null));
+    std::fs::write(old.join("closes/2026-09-28.json"), r#"{"seq": 1}"#).unwrap();
+    std::fs::write(
+        old.join("daily-pnl.csv"),
+        "session_date,delta,gamma,vega,theta,rho,higher_order,dividends,residual,actual\n\
+         2026-09-28,0,0,0,0,0,0,0,0,10.5\n2026-09-29,0,0,0,0,0,0,0,0,-2.5\n",
+    )
+    .unwrap();
+    // A session whose meta is damaged.
+    let broken = dir.path().join("sessions/broken");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(broken.join("meta.json"), "{").unwrap();
+
+    let response = router.oneshot(get("/api/sessions")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let list = json_body(response).await;
+    let rows = list.as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["id"], "old");
+    assert_eq!(rows[0]["simulated_days"], 1);
+    // The close does not parse, so the total is the sum of the daily P&L file.
+    assert_eq!(rows[0]["total_pnl"], 8.0);
+    assert_eq!(rows[0]["end"], serde_json::Value::Null);
+}

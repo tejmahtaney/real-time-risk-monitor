@@ -65,11 +65,15 @@ export function SavedRunsList({
   runs,
   onOpen,
   onDelete,
+  onCompare,
 }: {
   runs: BacktestListItem[]
   onOpen: (id: string) => void
   onDelete: (id: string) => Promise<void>
+  /** Called with two finished run ids to compare. Without it the list has no compare control. */
+  onCompare?: (a: string, b: string) => void
 }): ReactElement {
+  const [picked, setPicked] = useState<string[]>([])
   const [confirming, setConfirming] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const newestFirst = [...runs].sort((a, b) => b.created.localeCompare(a.created))
@@ -84,12 +88,30 @@ export function SavedRunsList({
     }
   }
 
+  const toggle = (id: string): void =>
+    setPicked((current) =>
+      current.includes(id) ? current.filter((x) => x !== id) : current.length < 2 ? [...current, id] : current,
+    )
+  const [first, second] = picked
+
   return (
     <section
       aria-label="Saved runs"
       className="flex flex-col gap-2 rounded-lg border border-border bg-surface-raised p-4"
     >
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral">Saved runs</h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral">Saved runs</h2>
+        {onCompare && (
+          <button
+            type="button"
+            disabled={first === undefined || second === undefined}
+            onClick={() => first !== undefined && second !== undefined && onCompare(first, second)}
+            className="rounded border border-border px-2 py-1 text-xs hover:bg-surface disabled:opacity-50"
+          >
+            Compare selected ({picked.length}/2)
+          </button>
+        )}
+      </div>
       {newestFirst.length === 0 ? (
         <p className="text-sm text-neutral">No saved runs yet.</p>
       ) : (
@@ -101,6 +123,16 @@ export function SavedRunsList({
               data-testid={`saved-run-${run.id}`}
             >
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm tabular-nums">
+                {onCompare && (
+                  <input
+                    type="checkbox"
+                    aria-label={`Compare ${run.id}`}
+                    title={run.state === 'finished' ? undefined : 'Only finished runs can be compared'}
+                    checked={picked.includes(run.id)}
+                    disabled={run.state !== 'finished' || (!picked.includes(run.id) && picked.length >= 2)}
+                    onChange={() => toggle(run.id)}
+                  />
+                )}
                 <span className="font-mono text-xs">{run.id}</span>
                 <span>{sourceLabel(run)}</span>
                 <span className="text-neutral">

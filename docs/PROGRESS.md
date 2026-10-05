@@ -325,3 +325,21 @@ Open issues: see the four Part 19 entries added above (OCC strike rounding, the 
 - Part 21: no component shows `change_since_open`, so nothing needed hiding in replay. If a column for it is added later it must be blanked in replay, where it is always 0.
 - Part 21: leaving the page frees the run even when it is playing, so a replay cannot carry on in the background. Opening an in-memory run from the saved list shows its partial results only, not a reattached replay.
 - Part 22: side-by-side comparison of saved runs.
+
+## Part 22: Storage browser
+
+**Built.** Header links for Live, Backtest, History, Portfolios and Data. History lists saved sessions (newest first, "cut short" and a dash for a missing end or P&L), opens one with Greeks over a chosen range of simulated dates (the server downsamples), the daily P&L table, events filtered by type and CSV exports, and compares two sessions on cumulative P&L and one Greek aligned by simulated time since each session's first point. Portfolios shows the current book, versions with an auto/named badge, "Save as version", and an inline load confirmation with the added, removed and changed-quantity diff (`lib/portfolioDiff.ts`, pure). Data shows the archive per symbol (fetch time, source, dates, a line of closes), per-symbol merged coverage and a usage bar coloured at the warning level. The Backtest saved-runs list can compare two finished runs (summary cards, cumulative P&L overlay, P&L by bucket), reading `GET /results` only, with no lease and no socket. `screenshot.ts` now also captures History, a session detail, Portfolios, Data and the backtest comparison.
+
+**Server routes added (all read-only).** `GET /api/portfolio/versions/{file}/specs` (JSON `PositionSpec` list) and `GET /api/market-data/archive/{symbol}/{file}/closes`. Existing responses grew: `VersionSummary` (`saved_at`, `name`, `auto`), `ArchiveFileInfo` (`source`, `dates`) and `ArchiveCoverage` (`symbols`: first date, last date, date count per symbol).
+
+**Fixes needed to read real saved data.** `GET /api/sessions` failed outright because sessions from older builds do not parse: one unreadable `meta.json` now skips that session, and an unreadable last close falls back to the sum of `daily-pnl.csv`, else no total P&L. `PnlBuckets.dividends` and `PositionRisk.adjusted` gained `#[serde(default)]` so history and closes written before Part 19 read back (the wire format is unchanged).
+
+**New dependencies.** None.
+
+**Tests.** Rust workspace 630, frontend 234.
+
+**Open issues.**
+- Part 22: sessions recorded before Part 18 have closes with no `var` field, which no longer parse. Their history and events load, but their total P&L comes from `daily-pnl.csv` and the per-day closes are not readable.
+- Part 22: the session comparison's cumulative P&L adds `pnl_today.actual` across New York dates, since history points only carry the current day's bucket. A session that restarts inside one simulated day is not detected.
+- Part 22: the screenshot script has not been run here (no browser). Run `npm run screenshot` in `frontend/` with the server and `npm run dev` up.
+- Part 22: deleting sessions, market data and portfolio versions is still not built (see the earlier Part 22 issue above). This part adds no delete.

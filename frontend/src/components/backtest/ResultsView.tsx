@@ -48,7 +48,8 @@ function Money({ value }: { value: number }): ReactElement {
   )
 }
 
-function SummaryCards({ results }: { results: BacktestResults }): ReactElement {
+/** The summary cards of one run. Shared with the saved-run comparison. */
+export function SummaryCards({ results }: { results: BacktestResults }): ReactElement {
   const { summary } = results
   const drawdown = summary.max_drawdown
   return (

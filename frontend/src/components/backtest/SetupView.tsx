@@ -24,9 +24,12 @@ function errorText(err: unknown): string {
 export function SetupView({
   onStarted,
   onOpenSaved,
+  onCompareSaved,
 }: {
   onStarted: (id: string) => void
   onOpenSaved: (id: string) => void
+  /** Opens the comparison of two finished saved runs. */
+  onCompareSaved?: (a: string, b: string) => void
 }): ReactElement {
   const [coverage, setCoverage] = useState<ArchiveCoverage | null>(null)
   const [runs, setRuns] = useState<BacktestListItem[]>([])
@@ -168,6 +171,7 @@ export function SetupView({
       <SavedRunsList
         runs={runs}
         onOpen={onOpenSaved}
+        onCompare={onCompareSaved}
         onDelete={async (id) => {
           await api.deleteBacktestFiles(id)
           await loadRuns()

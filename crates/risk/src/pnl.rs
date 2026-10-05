@@ -52,6 +52,7 @@ pub struct PnlBuckets {
     pub higher_order: f64,
     /// Cash dividends received on an ex-date: quantity × amount for a stock position, so a
     /// short position shows a negative figure. It is realised P&L, paid in cash.
+    #[serde(default)]
     pub dividends: f64,
     /// `actual` − `explained()`: what the buckets above do not account for.
     pub residual: f64,
@@ -141,4 +142,18 @@ pub struct PnlReport {
     pub by_position: BTreeMap<PositionId, PnlLevel>,
     /// The previous session's totals, once a session roll has happened.
     pub previous_day: Option<PreviousDay>,
+}
+
+#[cfg(test)]
+mod serde_compat_tests {
+    use super::PnlBuckets;
+
+    #[test]
+    fn buckets_saved_before_dividends_existed_read_back_with_zero_dividends() {
+        let old = r#"{"delta":1.0,"gamma":2.0,"vega":3.0,"theta":4.0,"rho":0.0,
+            "higher_order":0.5,"residual":0.25,"actual":11.0}"#;
+        let buckets: PnlBuckets = serde_json::from_str(old).unwrap();
+        assert!((buckets.dividends - 0.0).abs() < f64::EPSILON);
+        assert!((buckets.actual - 11.0).abs() < f64::EPSILON);
+    }
 }

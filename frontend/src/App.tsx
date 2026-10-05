@@ -6,9 +6,12 @@ import { BacktestPage } from './components/backtest/BacktestPage'
 import { Dashboard } from './components/Dashboard'
 import { Header } from './components/Header'
 import { ModeSwitch } from './components/ModeSwitch'
+import { DataPage } from './components/storage/DataPage'
+import { HistoryPage } from './components/storage/HistoryPage'
+import { PortfoliosPage } from './components/storage/PortfoliosPage'
 
-/** The app shell: the live header and mode switch, then the live dashboard at `/` or the
- * backtester at `/backtest`. The live stream starts here, once, so the dashboard keeps
+/** The app shell: the live header and mode switch, then the live dashboard at `/`, the
+ * backtester at `/backtest`, and the storage pages at `/history`, `/portfolios` and `/data`. The live stream starts here, once, so the dashboard keeps
  * updating in the background while a backtest runs. */
 export function App(): ReactElement {
   useEffect(() => {
@@ -27,6 +30,30 @@ export function App(): ReactElement {
           element={
             <main className="flex-1 p-4">
               <BacktestPage />
+            </main>
+          }
+        />
+        <Route
+          path="/history"
+          element={
+            <main className="flex-1 p-4">
+              <HistoryPage />
+            </main>
+          }
+        />
+        <Route
+          path="/portfolios"
+          element={
+            <main className="flex-1 p-4">
+              <PortfoliosPage />
+            </main>
+          }
+        />
+        <Route
+          path="/data"
+          element={
+            <main className="flex-1 p-4">
+              <DataPage />
             </main>
           }
         />

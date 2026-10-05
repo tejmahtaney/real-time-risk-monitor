@@ -2,11 +2,13 @@ import { useEffect, useState, type ReactElement } from 'react'
 
 import type { BacktestResults } from '../../api/generated/BacktestResults'
 import { api } from '../../api/rest'
+import { CompareRuns } from './CompareRuns'
 import { ReplayView } from './ReplayView'
 import { ResultsView } from './ResultsView'
 import { SetupView } from './SetupView'
 
 type View = { kind: 'setup' } | { kind: 'replay'; id: string } | { kind: 'saved'; id: string }
+  | { kind: 'compare'; a: string; b: string }
 
 /** A saved run's results, read straight from its saved files with no stream and no lease. */
 function SavedRun({ id, onBack }: { id: string; onBack: () => void }): ReactElement {
@@ -61,11 +63,14 @@ export function BacktestPage(): ReactElement {
       return <ReplayView key={view.id} id={view.id} onClose={() => setView({ kind: 'setup' })} />
     case 'saved':
       return <SavedRun key={view.id} id={view.id} onBack={() => setView({ kind: 'setup' })} />
+    case 'compare':
+      return <CompareRuns a={view.a} b={view.b} onBack={() => setView({ kind: 'setup' })} />
     case 'setup':
       return (
         <SetupView
           onStarted={(id) => setView({ kind: 'replay', id })}
           onOpenSaved={(id) => setView({ kind: 'saved', id })}
+          onCompareSaved={(a, b) => setView({ kind: 'compare', a, b })}
         />
       )
   }

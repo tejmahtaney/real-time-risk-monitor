@@ -36,8 +36,8 @@ const METRICS: Array<{ key: GreekMetric; title: string }> = [
   { key: 'var_99', title: 'VaR 99% ($)' },
 ]
 
-function axisTickLabel(t: number): string {
-  return formatSimTime(new Date(t).toISOString(), { seconds: false })
+function axisTickLabel(t: number, withDate: boolean): string {
+  return formatSimTime(new Date(t).toISOString(), { seconds: false, withDate })
 }
 
 function tooltipTimeLabel(t: number): string {
@@ -52,10 +52,12 @@ function GreekMiniChart({
   title,
   data,
   bounds,
+  withDate,
 }: {
   title: string
   data: SeriesPoint[]
   bounds: MetricBounds
+  withDate: boolean
 }): ReactElement {
   const scale = useMemo(() => computeChartScale(data.map((d) => d.value), bounds), [data, bounds])
   const bound = scale.visibleBound
@@ -83,7 +85,7 @@ function GreekMiniChart({
             dataKey="t"
             type="number"
             domain={['dataMin', 'dataMax']}
-            tickFormatter={axisTickLabel}
+            tickFormatter={(t) => axisTickLabel(Number(t), withDate)}
             stroke={CHART_AXIS}
             tick={{ fontSize: 10 }}
             minTickGap={24}
@@ -122,16 +124,24 @@ function GreekMiniChart({
  * `PositionsTable`'s doc comment for why). */
 export function GreeksCharts({
   history,
-  limits,
+  limits = [],
   className = '',
+  stored = false,
 }: {
   history: HistoryPoint[]
-  limits: LimitStatus[]
+  /** Live limits for the dashed line and band. Omit for none, as a saved session has none. */
+  limits?: LimitStatus[]
   className?: string
+  /** A saved session's range, already downsampled by the server: no 5 m / 15 m window
+   * control and no point cap, and axis ticks carry the date. */
+  stored?: boolean
 }): ReactElement {
   const [window, setWindow] = useState<ChartWindow>('15m')
 
-  const windowed = useMemo(() => capHistory(filterWindow(history, window)), [history, window])
+  const windowed = useMemo(
+    () => (stored ? history : capHistory(filterWindow(history, window))),
+    [history, window, stored],
+  )
 
   const series = useMemo(() => {
     const byMetric: Record<GreekMetric, SeriesPoint[]> = {
@@ -162,6 +172,7 @@ export function GreeksCharts({
     >
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-neutral">Greeks over time</h2>
+        {!stored && (
         <div className="flex gap-1" role="group" aria-label="Time window">
           {CHART_WINDOWS.map((w) => (
             <button
@@ -177,9 +188,10 @@ export function GreeksCharts({
             </button>
           ))}
         </div>
+        )}
       </div>
       {windowed.length === 0 ? (
-        <p className="text-sm text-neutral">Waiting for history…</p>
+        <p className="text-sm text-neutral">{stored ? 'No history in this range.' : 'Waiting for history…'}</p>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {METRICS.map((metric) => (
@@ -188,6 +200,7 @@ export function GreeksCharts({
               title={metric.title}
               data={series[metric.key]}
               bounds={metricBounds(limits, metric.key)}
+              withDate={stored}
             />
           ))}
         </div>

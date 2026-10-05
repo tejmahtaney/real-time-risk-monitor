@@ -125,6 +125,7 @@ pub struct PositionRisk {
     /// the cash dividends received so far, otherwise zero.
     pub realised_pnl: f64,
     /// Whether a split changed this option's contract terms. Drives the "adj" badge.
+    #[serde(default)]
     pub adjusted: bool,
     /// Raw per-unit Greeks from `pricing`. Equity has delta 1 and the rest zero.
     pub greeks: Greeks,

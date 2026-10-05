@@ -7,6 +7,7 @@
 import type { ArchiveCoverage } from './generated/ArchiveCoverage'
 import type { AlertsResponse } from './generated/AlertsResponse'
 import type { ArchiveFileInfo as _ArchiveFileInfo } from './generated/ArchiveFileInfo'
+import type { ArchiveClose } from './generated/ArchiveClose'
 import type { BacktestControlRequest } from './generated/BacktestControlRequest'
 import type { BacktestCreateRequest } from './generated/BacktestCreateRequest'
 import type { BacktestListItem } from './generated/BacktestListItem'
@@ -123,10 +124,19 @@ export const api = {
   sessions: (): Promise<SessionSummary[]> => getJson('/api/sessions'),
   sessionDetail: (id: string): Promise<SessionDetail> =>
     getJson(`/api/sessions/${encodeURIComponent(id)}`),
-  sessionHistory: (id: string, maxPoints?: number): Promise<HistoryPoint[]> =>
-    getJson(
-      `/api/sessions/${encodeURIComponent(id)}/history${maxPoints === undefined ? '' : `?max_points=${maxPoints}`}`,
-    ),
+  /** A session's history, downsampled by the server to `maxPoints`. `from` and `to` are ISO
+   * instants bounding the range (inclusive). */
+  sessionHistory: (
+    id: string,
+    range: { maxPoints?: number; from?: string; to?: string } = {},
+  ): Promise<HistoryPoint[]> => {
+    const query = new URLSearchParams()
+    if (range.maxPoints !== undefined) query.set('max_points', String(range.maxPoints))
+    if (range.from !== undefined) query.set('from', range.from)
+    if (range.to !== undefined) query.set('to', range.to)
+    const suffix = query.size === 0 ? '' : `?${query.toString()}`
+    return getJson(`/api/sessions/${encodeURIComponent(id)}/history${suffix}`)
+  },
   sessionEvents: (id: string, type?: string): Promise<SessionEvent[]> =>
     getJson(
       `/api/sessions/${encodeURIComponent(id)}/events${type === undefined ? '' : `?type=${encodeURIComponent(type)}`}`,
@@ -135,6 +145,9 @@ export const api = {
   portfolioVersions: (): Promise<VersionSummary[]> => getJson('/api/portfolio/versions'),
   savePortfolioVersion: (request: SaveVersionRequest): Promise<SavedVersionResponse> =>
     postJson('/api/portfolio/versions', request),
+  /** The positions a saved version holds, as JSON. */
+  portfolioVersionSpecs: (file: string): Promise<PositionSpec[]> =>
+    getJson(`/api/portfolio/versions/${encodeURIComponent(file)}/specs`),
   loadPortfolioVersion: (file: string): Promise<LoadedVersionResponse> =>
     postJson(`/api/portfolio/versions/${encodeURIComponent(file)}/load`),
 
@@ -166,6 +179,11 @@ export const api = {
   deleteBacktestFiles: (id: string): Promise<void> =>
     del(`/api/backtests/${encodeURIComponent(id)}/files`, { confirm: id }),
 
+  /** The closes of one archived download. */
+  archiveFileCloses: (symbol: string, file: string): Promise<ArchiveClose[]> =>
+    getJson(
+      `/api/market-data/archive/${encodeURIComponent(symbol)}/${encodeURIComponent(file)}/closes`,
+    ),
   marketDataArchive: (): Promise<SymbolArchive[]> => getJson('/api/market-data/archive'),
 }
 
