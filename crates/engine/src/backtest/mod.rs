@@ -28,4 +28,5 @@ pub use types::{
     ArchiveCoverage, BACKTESTS_FOLDER, BacktestEvent, BacktestListItem, BacktestResults,
     BacktestRunState, BacktestSettings, BacktestSource, BacktestSplitHandling, BacktestSplitNote,
     BacktestStatus, DAILY_FILE, EVENTS_FILE, INPUT_FILE, SETTINGS_FILE, SUMMARY_FILE,
+    SymbolCoverage,
 };

@@ -230,4 +230,20 @@ pub struct ArchiveCoverage {
     pub aligned_dates: usize,
     /// The portfolio symbols with no archived history, so no run can start until they are fetched.
     pub missing_symbols: Vec<Symbol>,
+    /// What the merged archive holds for each portfolio symbol on its own, before alignment.
+    pub symbols: Vec<SymbolCoverage>,
+}
+
+/// One symbol's merged archive history, as listed in [`ArchiveCoverage::symbols`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
+pub struct SymbolCoverage {
+    /// The symbol.
+    pub symbol: Symbol,
+    /// Its first archived date. `None` when nothing is archived.
+    pub first_date: Option<NaiveDate>,
+    /// Its last archived date.
+    pub last_date: Option<NaiveDate>,
+    /// How many distinct dates the merged archive holds for it.
+    pub dates: usize,
 }

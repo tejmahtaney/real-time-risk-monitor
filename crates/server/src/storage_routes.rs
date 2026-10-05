@@ -35,8 +35,16 @@ pub fn router() -> Router<AppState> {
             get(list_versions).post(save_version),
         )
         .route("/api/portfolio/versions/{file}", get(get_version))
+        .route(
+            "/api/portfolio/versions/{file}/specs",
+            get(get_version_specs),
+        )
         .route("/api/portfolio/versions/{file}/load", post(load_version))
         .route("/api/market-data/archive", get(market_data_archive))
+        .route(
+            "/api/market-data/archive/{symbol}/{file}/closes",
+            get(archive_file_closes),
+        )
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -252,6 +260,31 @@ fn event_type_tag(event: &SessionEvent) -> &'static str {
 struct VersionSummary {
     file: String,
     size_bytes: u64,
+    /// When the version was saved, from the UTC stamp in its file name.
+    saved_at: DateTime<Utc>,
+    /// The name it was saved under, as words (the file name carries the slug).
+    name: String,
+    /// True for the automatic `session-start` version, false for one saved by name.
+    auto: bool,
+}
+
+/// The stem of the version the server saves by itself at each start.
+const AUTO_VERSION_STEM: &str = "session-start";
+
+/// Splits `<UTC stamp>-<stem>[_NN].csv` (see `storage::write_bytes_new`) into its time, display
+/// name and auto flag. `None` for a file not named that way.
+fn parse_version_name(file: &str) -> Option<(DateTime<Utc>, String, bool)> {
+    let base = file.strip_suffix(".csv")?;
+    let (stamp, rest) = base.split_once('-')?;
+    let saved_at = NaiveDateTime::parse_from_str(stamp, "%Y%m%dT%H%M%SZ")
+        .ok()?
+        .and_utc();
+    // A name clash within one second appends `_NN`; it is not part of the name.
+    let stem = match rest.rsplit_once('_') {
+        Some((head, tail)) if !tail.is_empty() && tail.bytes().all(|b| b.is_ascii_digit()) => head,
+        _ => rest,
+    };
+    Some((saved_at, stem.replace('-', " "), stem == AUTO_VERSION_STEM))
 }
 
 async fn list_versions(
@@ -263,9 +296,15 @@ async fn list_versions(
         let Some(file) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
+        let Some((saved_at, name, auto)) = parse_version_name(file) else {
+            continue;
+        };
         out.push(VersionSummary {
             file: file.to_owned(),
             size_bytes: engine::size_of(&path)?,
+            saved_at,
+            name,
+            auto,
         });
     }
     Ok(Json(out))
@@ -325,6 +364,24 @@ async fn get_version(
     Ok((headers, bytes))
 }
 
+/// `GET /api/portfolio/versions/{file}/specs`: the version's positions as JSON, so a client can
+/// compare it with the book without parsing CSV.
+async fn get_version_specs(
+    State(state): State<AppState>,
+    Path(file): Path<String>,
+) -> Result<Json<Vec<engine::PositionSpec>>, ApiError> {
+    safe_segment(&file)?;
+    let path = state
+        .storage_root
+        .join(&["portfolios", "versions", &file])?;
+    let bytes = std::fs::read(&path).map_err(|source| engine::StorageError::Io {
+        action: "read",
+        path: path.clone(),
+        source,
+    })?;
+    Ok(Json(engine::parse_csv(bytes.as_slice())?))
+}
+
 #[derive(Serialize, ts_rs::TS)]
 #[ts(export)]
 struct LoadedVersionResponse {
@@ -369,6 +426,55 @@ struct ArchiveFileInfo {
     file: String,
     fetched_at: DateTime<Utc>,
     size_bytes: u64,
+    /// Where the download came from: the vendor and its function. `unreadable` if the file
+    /// does not parse.
+    source: String,
+    /// How many dates the download holds. `0` if the file does not parse.
+    dates: usize,
+}
+
+/// One date and close of an archived download.
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
+struct ArchiveClose {
+    date: chrono::NaiveDate,
+    close: f64,
+}
+
+fn read_archive_file(path: &StdPath) -> Option<(String, Vec<engine::DailyBar>)> {
+    let record: engine::ArchiveRecord = engine::read_json(path).ok()?;
+    let bars = engine::parse_daily_body(&record.body).ok()?;
+    Some((format!("Alpha Vantage {}", record.params.function), bars))
+}
+
+/// `GET /api/market-data/archive/{symbol}/{file}/closes`: the closes of one archived download,
+/// oldest first. Kept off the list so that stays light.
+async fn archive_file_closes(
+    State(state): State<AppState>,
+    Path((symbol, file)): Path<(String, String)>,
+) -> Result<Json<Vec<ArchiveClose>>, ApiError> {
+    safe_segment(&symbol)?;
+    safe_segment(&file)?;
+    let path = state.storage_root.join(&["market-data", &symbol, &file])?;
+    // Missing file is a 404 through the storage error's not-found mapping.
+    std::fs::metadata(&path).map_err(|source| engine::StorageError::Io {
+        action: "read",
+        path: path.clone(),
+        source,
+    })?;
+    let Some((_, bars)) = read_archive_file(&path) else {
+        return Err(ApiError::Validation(format!(
+            "{file} is not a readable download"
+        )));
+    };
+    Ok(Json(
+        bars.into_iter()
+            .map(|bar| ArchiveClose {
+                date: bar.date,
+                close: bar.close,
+            })
+            .collect(),
+    ))
 }
 
 #[derive(Serialize, ts_rs::TS)]
@@ -379,8 +485,8 @@ struct SymbolArchive {
 }
 
 /// The fetch time is parsed straight out of each file's name (the `storage::timestamp_name`
-/// prefix), so this never needs to open and parse every archived JSON body just to list
-/// them.
+/// prefix). The source and date count need each file opened, but the closes stay behind their
+/// own route.
 async fn market_data_archive(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<SymbolArchive>>, ApiError> {
@@ -401,10 +507,16 @@ async fn market_data_archive(
             let Ok(naive) = NaiveDateTime::parse_from_str(prefix, "%Y%m%dT%H%M%SZ") else {
                 continue;
             };
+            let (source, dates) = match read_archive_file(&path) {
+                Some((source, bars)) => (source, bars.len()),
+                None => ("unreadable".to_owned(), 0),
+            };
             files.push(ArchiveFileInfo {
                 file: name.to_owned(),
                 fetched_at: naive.and_utc(),
                 size_bytes: engine::size_of(&path)?,
+                source,
+                dates,
             });
         }
         out.push(SymbolArchive {
@@ -436,6 +548,22 @@ mod tests {
             worst_limit_utilisation: 0.0,
             var_99: None,
         }
+    }
+
+    #[test]
+    fn version_names_split_into_time_name_and_auto_flag() {
+        let (at, name, auto) = parse_version_name("20260928T120227Z-session-start.csv").unwrap();
+        assert_eq!(at, Utc.with_ymd_and_hms(2026, 9, 28, 12, 2, 27).unwrap());
+        assert_eq!(name, "session start");
+        assert!(auto);
+
+        let (_, name, auto) =
+            parse_version_name("20260928T120320Z-live-smoke-test_02.csv").unwrap();
+        assert_eq!(name, "live smoke test");
+        assert!(!auto);
+
+        assert!(parse_version_name("notes.csv").is_none());
+        assert!(parse_version_name("badstamp-x.csv").is_none());
     }
 
     #[test]

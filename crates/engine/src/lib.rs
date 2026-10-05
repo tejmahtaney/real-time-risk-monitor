@@ -18,7 +18,7 @@ pub use backtest::{
     BacktestSettings, BacktestSource, BacktestSplitHandling, BacktestSplitNote, BacktestStatus,
     BacktestSubscription, ClientGuard, ControlCommand, CreateOptions, DAILY_FILE, DEFAULT_SPEED,
     EVENTS_FILE, INPUT_FILE, MAX_SPEED, MIN_SPEED, RollPolicy, RunInput, SETTINGS_FILE,
-    SUMMARY_FILE, SpecRoller,
+    SUMMARY_FILE, SpecRoller, SymbolCoverage,
 };
 pub use command::{EngineCommand, EngineCommandError, EngineReply, EngineRequest};
 pub use corporate::{
@@ -41,11 +41,12 @@ pub use domain::{
     PositionId, SimClock, StepKind, Symbol, market_date,
 };
 pub use marketdata::{
-    AlphaVantageSource, Archive, CalibrationError, CorporateActionCalendar, CorporateActionError,
-    CorporateActionsConfig, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL, DataMode, DataSource,
-    FeedError, GbmSimulator, HistoryLoader, MarketConfig, MarketDataError, PriceFeed,
-    ScheduledAction, SeedData, SimulationConfig, SymbolSeed, SystemClock, VolProcessConfig,
-    apply_ledger_to_seed, calibrate, load_upcoming_dividends,
+    AlphaVantageSource, Archive, ArchiveRecord, CalibrationError, CorporateActionCalendar,
+    CorporateActionError, CorporateActionsConfig, DEFAULT_BASE_URL, DEFAULT_REQUEST_INTERVAL,
+    DailyBar, DataMode, DataSource, FeedError, GbmSimulator, HistoryLoader, MarketConfig,
+    MarketDataError, PriceFeed, ScheduledAction, SeedData, SimulationConfig, SymbolSeed,
+    SystemClock, VolProcessConfig, apply_ledger_to_seed, calibrate, load_upcoming_dividends,
+    parse_daily_body,
 };
 pub use portfolio::{
     PortfolioError, PositionRisk, PositionSpec, PositionStatus, load_csv, parse_csv, to_csv_bytes,

@@ -210,3 +210,176 @@ async fn restart_with_last_restores_the_book_from_current_json() {
 
     drop(dir);
 }
+
+fn archive_file(storage: &std::path::Path, symbol: &str, name: &str, closes: &[(&str, f64)]) {
+    let series: Vec<String> = closes
+        .iter()
+        .map(|(date, close)| {
+            format!(
+                r#""{date}":{{"1. open":"1","2. high":"1","3. low":"1","4. close":"{close}","5. volume":"1"}}"#
+            )
+        })
+        .collect();
+    let body = format!(
+        r#"{{"Meta Data":{{"1. Information":"Daily Prices"}},"Time Series (Daily)":{{{}}}}}"#,
+        series.join(",")
+    );
+    let record = json!({
+        "symbol": symbol,
+        "fetched_at": "2026-03-01T00:00:00Z",
+        "params": {"function": "TIME_SERIES_DAILY", "symbol": symbol, "outputsize": "compact", "datatype": "json"},
+        "body": body,
+    });
+    let folder = storage.join("market-data").join(symbol);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join(name), record.to_string()).unwrap();
+}
+
+#[tokio::test]
+async fn versions_list_carries_time_name_and_auto_flag_and_specs_come_back_as_json() {
+    let (router, dir) = test_router();
+    let folder = dir.path().join("portfolios").join("versions");
+    std::fs::create_dir_all(&folder).unwrap();
+
+    let response = router
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/portfolio/versions",
+            &json!({"name": "Before Add"}),
+        ))
+        .await
+        .unwrap();
+    let file = json_body(response).await["file"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let auto = std::fs::read(folder.join(&file)).unwrap();
+    std::fs::write(folder.join("20260101T000000Z-session-start.csv"), auto).unwrap();
+
+    let list = json_body(
+        router
+            .clone()
+            .oneshot(get("/api/portfolio/versions"))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let rows = list.as_array().unwrap();
+    let named = rows.iter().find(|r| r["file"] == file.as_str()).unwrap();
+    assert_eq!(named["name"], "before add");
+    assert_eq!(named["auto"], false);
+    assert!(named["saved_at"].as_str().unwrap().ends_with('Z'));
+    let auto_row = rows
+        .iter()
+        .find(|r| r["file"] == "20260101T000000Z-session-start.csv")
+        .unwrap();
+    assert_eq!(auto_row["auto"], true);
+    assert_eq!(auto_row["saved_at"], "2026-01-01T00:00:00Z");
+
+    let response = router
+        .clone()
+        .oneshot(get(&format!("/api/portfolio/versions/{file}/specs")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let specs = json_body(response).await;
+    assert_eq!(specs.as_array().unwrap().len(), 1);
+    assert_eq!(specs[0]["id"], "spy-stock");
+
+    let response = router
+        .oneshot(get("/api/portfolio/versions/%2E%2E/specs"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn archive_list_has_source_and_date_count_and_closes_come_from_their_own_route() {
+    let (router, dir) = test_router();
+    archive_file(
+        dir.path(),
+        "SPY",
+        "20260301T000000Z-daily.json",
+        &[("2026-02-26", 500.0), ("2026-02-27", 502.5)],
+    );
+    std::fs::write(
+        dir.path()
+            .join("market-data/SPY/20260302T000000Z-daily.json"),
+        "not json",
+    )
+    .unwrap();
+
+    let list = json_body(
+        router
+            .clone()
+            .oneshot(get("/api/market-data/archive"))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let files = list[0]["files"].as_array().unwrap();
+    assert_eq!(files[0]["source"], "Alpha Vantage TIME_SERIES_DAILY");
+    assert_eq!(files[0]["dates"], 2);
+    assert!(files[0].get("closes").is_none(), "the list stays light");
+    assert_eq!(files[1]["source"], "unreadable");
+    assert_eq!(files[1]["dates"], 0);
+
+    let closes = json_body(
+        router
+            .clone()
+            .oneshot(get(
+                "/api/market-data/archive/SPY/20260301T000000Z-daily.json/closes",
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        closes,
+        json!([
+            {"date": "2026-02-26", "close": 500.0},
+            {"date": "2026-02-27", "close": 502.5},
+        ])
+    );
+
+    let missing = router
+        .clone()
+        .oneshot(get("/api/market-data/archive/SPY/nope.json/closes"))
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    let traversal = router
+        .oneshot(get("/api/market-data/archive/%2E%2E/x.json/closes"))
+        .await
+        .unwrap();
+    assert_eq!(traversal.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn archive_coverage_lists_each_symbols_merged_dates() {
+    let (router, dir) = test_router();
+    archive_file(
+        dir.path(),
+        "SPY",
+        "20260301T000000Z-daily.json",
+        &[("2026-02-25", 1.0), ("2026-02-26", 2.0)],
+    );
+    archive_file(
+        dir.path(),
+        "SPY",
+        "20260302T000000Z-daily.json",
+        &[("2026-02-26", 2.0), ("2026-02-27", 3.0)],
+    );
+    let coverage = json_body(
+        router
+            .oneshot(get("/api/backtests/archive-coverage"))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        coverage["symbols"],
+        json!([{"symbol": "SPY", "first_date": "2026-02-25", "last_date": "2026-02-27", "dates": 3}])
+    );
+}

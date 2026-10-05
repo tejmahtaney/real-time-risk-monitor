@@ -20,6 +20,7 @@ use super::error::BacktestError;
 use super::roll::{SpecRoller, next_date};
 use super::types::{
     ArchiveCoverage, BacktestSettings, BacktestSource, BacktestSplitHandling, BacktestSplitNote,
+    SymbolCoverage,
 };
 use crate::corporate::CorporateActionState;
 use crate::engine::Engine;
@@ -345,8 +346,15 @@ pub(crate) fn archive_coverage(config: &BacktestConfig) -> Result<ArchiveCoverag
     let archive = Archive::new(config.storage.clone());
     let mut series = Vec::with_capacity(symbols.len());
     let mut missing_symbols = Vec::new();
+    let mut per_symbol = Vec::with_capacity(symbols.len());
     for symbol in &symbols {
         let merged = archive.merged_history(symbol)?;
+        per_symbol.push(SymbolCoverage {
+            symbol: symbol.clone(),
+            first_date: merged.bars.first().map(|bar| bar.date),
+            last_date: merged.bars.last().map(|bar| bar.date),
+            dates: merged.bars.len(),
+        });
         if merged.bars.is_empty() {
             missing_symbols.push(symbol.clone());
         } else {
@@ -358,6 +366,7 @@ pub(crate) fn archive_coverage(config: &BacktestConfig) -> Result<ArchiveCoverag
         last_date: None,
         aligned_dates: 0,
         missing_symbols: missing_symbols.clone(),
+        symbols: per_symbol.clone(),
     };
     if !missing_symbols.is_empty() {
         return Ok(empty);
@@ -372,5 +381,6 @@ pub(crate) fn archive_coverage(config: &BacktestConfig) -> Result<ArchiveCoverag
         last_date: table.end_date(),
         aligned_dates: table.len(),
         missing_symbols,
+        symbols: per_symbol,
     })
 }
