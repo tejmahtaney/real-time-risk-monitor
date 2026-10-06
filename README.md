@@ -2,8 +2,9 @@
 
 A real-time risk monitor for an options book. A Rust backend prices European options with Black-Scholes-Merton, computes Greeks on a live price feed, adds up the risk across the book, splits each tick's P&L into its causes, and raises alerts when a limit is crossed. A React dashboard shows it all live. The simulated prices are seeded from real market data, and everything the app produces is saved to a local folder for later review. It runs on your own machine and talks to nothing but the Alpha Vantage API.
 
-<!-- Part 24 records docs/demo.gif and replaces this line with: ![Demo](docs/demo.gif) -->
-> *Demo recording: coming in Part 24.*
+![Demo](docs/demo.gif)
+
+The same walk-through at full speed and 1,440 px: [docs/demo.mp4](docs/demo.mp4).
 
 ![The live dashboard](docs/screenshots/dashboard-1920.png)
 
@@ -305,7 +306,7 @@ Most defaults were tuned for the simulated sample book, so a real book needs its
 
 ## Testing
 
-Test counts at tag `part-22-r2`: **631 Rust and 244 frontend** tests. Part 23 added 2 frontend tests, so 246 now.
+**635 Rust and 250 frontend** tests, plus 2 ignored soak tests that run only on request.
 
 - **Reference values.** Prices and Greeks are checked against mpmath to 1e-10, and against worked examples from Hull and Haug.
 - **Finite differences.** Every Greek is compared with a central difference, using bump sizes that balance truncation and round-off. A planted 1e-5 error in volga is caught.
@@ -320,7 +321,7 @@ make ci         # make check, the generated-types check, the frontend checks and
 
 ## Performance
 
-Measured on the development machine, **[CPU model: to be confirmed by the author]** running Linux. The criterion rows are the figures logged during the build. The two rows marked "to be re-measured in phase B" are measured against the release Docker image with `scripts/measure-compute.sh`, which samples for 2 minutes and prints the median and p99.
+Measured on 6 October 2026 on the release Docker image with the sample book, on an AMD Ryzen 5 5500 running Linux. The criterion rows are the figures logged during the build. The two measured rows come from `scripts/measure-compute.sh`.
 
 | What | Result | Build |
 |---|---|---|
@@ -328,10 +329,12 @@ Measured on the development machine, **[CPU model: to be confirmed by the author
 | 10,000 varied options (criterion) | 441 µs, 44.1 ns each, 22.7 million options a second | release |
 | Implied vol, near the money (criterion) | 160 ns | release |
 | Implied vol, deep out of the money (criterion) | 762 ns | release |
-| `compute_micros`, whole tick, VaR included (5 symbols) | to be re-measured in phase B | release (Docker image) |
-| VaR `total_compute_micros`, all three methods, fresh ticks only | to be re-measured in phase B | release (Docker image) |
+| `compute_micros`, whole tick, VaR included (5 symbols, n = 596) | median 468 µs, p99 1,906 µs, max 2,195 µs | release (Docker image) |
+| VaR `total_compute_micros`, all three methods, fresh computations only (n = 296) | median 1,008 µs, p99 1,694 µs | release (Docker image) |
 
-A tick has a 250 ms budget and VaR has a 1 ms budget. If its warm-up median is over budget it recomputes every 2 to 10 ticks. That did not trigger in the Part 12 measurements.
+A tick has a 250 ms budget and VaR has a 1 ms budget. VaR's warm-up median was over its budget, so the throttle did trigger: VaR recomputes every second tick and the ticks in between reuse the last result.
+
+**Soak.** Release build on a cloud machine. At maximum speed with 20 WebSocket clients for 10 minutes, memory stayed flat at 23.4 to 23.8 MB, no records were dropped, and storage grew by 1,505 MiB per hour. At the default speed no records were dropped and storage grew by 10.2 MiB per hour.
 
 ## Local storage
 
@@ -357,11 +360,11 @@ Times in file names are UTC, `YYYYMMDDTHHMMSSZ`, so they sort in time order.
 **Crash safety.**
 - JSON files are written to a temp file in the same folder, synced, then renamed. A crash leaves the old file or nothing, never half a file.
 - JSONL logs are append-only and flushed at least once a second. A truncated last line is skipped with a warning. A broken line earlier in the file is a hard error.
-- A `meta.json` with no end time means the session was cut short. Readers treat it as unfinished, not as bad data.
+- A `meta.json` with no end time is either the session the engine is recording now (the History page badges it "running") or one that was cut short. Readers treat it as unfinished, not as bad data.
 - Disk writes happen on the recorder task, never on the tick.
 - The app deletes nothing unless you trigger a delete. Only **backtest run folders** can be deleted, from the Backtest page, and the run id must be typed back to confirm.
 
-**Size.** `config/storage.toml` sets a soft ceiling of 20 GiB. At 80 % the app logs a warning and sets a flag on `/api/health` and `/api/storage`. It never deletes anything to make room. A live session measured about **8.56 MB per real hour** (946,747 bytes in 398 seconds), almost all of it `history.jsonl`.
+**Size.** `config/storage.toml` sets a soft ceiling of 20 GiB. At 80 % the app logs a warning and sets a flag on `/api/health` and `/api/storage`. It never deletes anything to make room. At the default speed a live session grows by about **10.2 MiB per real hour**, almost all of it `history.jsonl`. At maximum speed (a 1 ms tick) it grows by about 1,505 MiB per hour.
 
 **Storage browser.** The History page lists saved sessions, charts one session, and compares two. Portfolios lists saved versions, shows a diff against the live book before loading, and exports. Data shows the market-data archive, folder sizes and the usage warning. All three only read, apart from loading a portfolio version.
 

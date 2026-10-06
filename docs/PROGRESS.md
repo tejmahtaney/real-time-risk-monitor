@@ -4,6 +4,7 @@
 
 ## Open issues
 
+- Part 24: a backtest replay step takes about 29 ms, because `VarCalculator::set_window` clears the Monte Carlo cache and redraws the 10,000 scenarios on every date. Only the Cholesky factor needs rebuilding when the window moves, so the redraw is avoidable.
 - Part 19: the split detector (Part 7) only sees splits inside the 100-day fetched window and only matches ratios within 2 % of 1.5, 2, 3, 4, 5, 10, 20 or their inverses. A real one-day drop of about 33 % would be misread as a 3-for-2 split. It is logged as a warning, so it is visible.
 - Part 19: the simulator has one drift μ for every symbol, and the vol shocks of different symbols correlate through the price shocks (corr of W_i, W_j is ρ² times the price correlation). Neither is calibrated from data.
 - Part 19: exchange holidays are ignored by `SimClock`, so a simulated session runs on days the real market is shut.
@@ -357,3 +358,18 @@ Wrote `README.md` (features, quick start, two mermaid diagrams, the maths, limit
 Hardening, demo script and changelog draft. Audit found no panics in non-test code; fixed one possible out-of-range index in `risk::var::interpolated_quantile`. API error messages no longer carry storage paths (`server::error`, with tests), and WebSocket clients are capped at 64 (`ws::check_capacity`, with a test). Wrote the ignored soak tests (`crates/server/tests/soak.rs`), `deny.toml`, `scripts/measure-compute.sh`, `frontend/scripts/record-demo.ts` with `npm run demo` and `make demo`, and a draft `CHANGELOG.md`. README: the rate is described as hand-entered, performance rows marked for phase B, the CPU model left as a placeholder to confirm. Crash test, traversal checks and `git status` check passed on a debug server with an isolated storage folder. New dependencies: none. Not run, by instruction: soak, release tests, `cargo audit`, `cargo deny`, `make ci`, Docker, benchmarks, `make snapshot`, tagging. Not done: the roadmap half of step 1.11 (the prompt says not to read `docs/ROADMAP.md`). Open issues: the History page shows a running session as "cut short"; the gap list is in `docs/notes/part-24-release.md`.
 
 Part 24 (phase A) tests: 634 Rust (3 new, plus 2 ignored soak tests), 246 frontend.
+
+## Part 24 (phase B)
+
+Release fixes and docs, from the controller's runs on commit 8b6909f.
+
+- **`cargo deny`.** Every workspace crate has `publish = false`, so its path dependencies are no longer public wildcards. Removed the unused `OpenSSL` licence allowance. `cargo update -p yoke-derive` moved the yanked 0.8.3 to 0.8.4.
+- **Release test.** `the_live_engine_keeps_ticking_while_a_backtest_runs` now sizes itself: while a run finishes in under 300 ms it doubles the dates and retries, up to six doublings. It holds in debug and release by construction.
+- **Running sessions.** `GET /api/sessions` and `GET /api/sessions/{id}` carry `running`, true for the engine's current session (`EngineHandle::session_id`). History shows a "running" badge and keeps "cut short" for sessions that ended without an end time. `make types` was run.
+- **Demo.** `RRM_DEMO_QUANTITY` defaults to 15. The recording is about 90 seconds: shorter waits, and the speed-up step ends at the day roll. It scrolls the alerts pane, the backtest summary cards with the cumulative chart, and the daily P&L table into full view before each pause. `make demo` converts the GIF at 800 px, 6 fps, double speed, 64 colours, no dither (`diff_mode=rectangle`), and keeps the MP4 at 1,440 px and full speed.
+- **README.** Demo embed, measured performance (CPU from `/proc/cpuinfo`), soak results, the 10.2 MiB per hour storage figure and the test counts.
+- **Docs.** Gap list now walks `docs/ROADMAP.md` as well as `core-plan.md`. `CHANGELOG.md` is final for v1.0.0. `docs/notes/part-24-release.md` is finished.
+
+New dependencies: none. Tests: 635 Rust (1 new, plus 2 ignored soak tests), 250 frontend (4 new). Not run, by instruction: `--release` builds, Docker, `make ci`, the soak, `make snapshot`, tagging, and the demo recording.
+
+Open issues: the replay step cost above (listed at the top).

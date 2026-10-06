@@ -21,6 +21,7 @@ const summary = (overrides: Partial<SessionSummary> = {}): SessionSummary => ({
   size_bytes: 2048,
   git_commit: 'abcdef1234567',
   total_pnl: 1234,
+  running: false,
   ...overrides,
 })
 
@@ -64,6 +65,13 @@ describe('sessionRowView', () => {
     expect(view.cutShort).toBe(true)
     expect(view.end).toBe('cut short')
     expect(view.pnl).toBe('—')
+  })
+
+  it('says running, not cut short, for the engine\'s current session', () => {
+    const view = sessionRowView(summary({ end: null, total_pnl: null, running: true }))
+    expect(view.running).toBe(true)
+    expect(view.cutShort).toBe(false)
+    expect(view.end).toBe('running')
   })
 
   it('sorts newest first', () => {

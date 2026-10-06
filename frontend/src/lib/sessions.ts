@@ -10,8 +10,12 @@ import { formatBytes } from './usage'
 export interface SessionRowView {
   id: string
   start: string
-  /** The end time, or `cut short` when the session never recorded one. */
+  /** The end time, `running` for the engine's current session, or `cut short` when an earlier
+   * session never recorded one. */
   end: string
+  /** The engine is recording this session right now. */
+  running: boolean
+  /** Ended without an end time: a crash or kill. A running session is not cut short. */
   cutShort: boolean
   days: number
   size: string
@@ -26,13 +30,14 @@ function formatWall(iso: string): string {
   return formatSimTime(iso, { seconds: false, withDate: true })
 }
 
-/** The table row for a session. `end` and `total_pnl` are null for a cut-short session. */
+/** The table row for a session. `end` and `total_pnl` are null for a session that has not ended. */
 export function sessionRowView(session: SessionSummary): SessionRowView {
   return {
     id: session.id,
     start: formatWall(session.start),
-    end: session.end === null ? 'cut short' : formatWall(session.end),
-    cutShort: session.end === null,
+    end: session.end !== null ? formatWall(session.end) : session.running ? 'running' : 'cut short',
+    running: session.running,
+    cutShort: session.end === null && !session.running,
     days: session.simulated_days,
     size: formatBytes(session.size_bytes),
     commit: session.git_commit.slice(0, 7),

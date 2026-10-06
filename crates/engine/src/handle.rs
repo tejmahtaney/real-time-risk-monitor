@@ -18,6 +18,7 @@ pub struct EngineHandle {
     alerts: broadcast::Sender<AlertEvent>,
     requests: mpsc::Sender<EngineRequest>,
     dropped_records: Arc<AtomicU64>,
+    session_id: Arc<str>,
 }
 
 impl EngineHandle {
@@ -28,13 +29,21 @@ impl EngineHandle {
         alerts: broadcast::Sender<AlertEvent>,
         requests: mpsc::Sender<EngineRequest>,
         dropped_records: Arc<AtomicU64>,
+        session_id: Arc<str>,
     ) -> Self {
         Self {
             snapshots,
             alerts,
             requests,
             dropped_records,
+            session_id,
         }
+    }
+
+    /// The id of the session this engine is recording right now. A session on disk with
+    /// this id is the running one; every other session has ended or was cut short.
+    pub fn session_id(&self) -> &str {
+        &self.session_id
     }
 
     /// Records dropped because the session recorder's channel was full, cumulative for

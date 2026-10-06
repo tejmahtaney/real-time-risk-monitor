@@ -126,7 +126,10 @@ export function SessionDetail({ id, onBack }: { id: string; onBack: () => void }
         <h2 className="text-base font-semibold">
           Session <span className="font-mono text-sm">{id}</span>
         </h2>
-        {meta && meta.end === null && (
+        {detail.data?.running === true && (
+          <span className="rounded bg-up/20 px-1.5 py-0.5 text-xs text-up">running</span>
+        )}
+        {meta && meta.end === null && detail.data?.running !== true && (
           <span className="rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning">cut short</span>
         )}
       </div>

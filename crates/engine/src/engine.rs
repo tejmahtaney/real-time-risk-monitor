@@ -722,6 +722,7 @@ impl<F: PriceFeed, C: EngineClock> Engine<F, C> {
             dropped_records.clone(),
         ));
         let dropped_records_for_task = dropped_records.clone();
+        let session_id: Arc<str> = Arc::from(self.session_id.as_str());
 
         let engine_join = tokio::spawn(async move {
             let mut interval = tokio::time::interval(tick_interval);
@@ -754,7 +755,13 @@ impl<F: PriceFeed, C: EngineClock> Engine<F, C> {
         });
 
         (
-            EngineHandle::new(snapshot_rx, alert_tx, request_tx, dropped_records),
+            EngineHandle::new(
+                snapshot_rx,
+                alert_tx,
+                request_tx,
+                dropped_records,
+                session_id,
+            ),
             engine_join,
         )
     }

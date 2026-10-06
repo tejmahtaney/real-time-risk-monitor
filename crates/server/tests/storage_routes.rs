@@ -426,3 +426,47 @@ async fn one_unreadable_session_does_not_hide_the_others() {
     assert_eq!(rows[0]["total_pnl"], 8.0);
     assert_eq!(rows[0]["end"], serde_json::Value::Null);
 }
+
+#[tokio::test]
+async fn only_the_engines_current_session_is_running() {
+    let (router, dir) = test_router();
+    // An earlier session that never wrote an end time: cut short, not running.
+    let folder = dir.path().join("sessions/20200101T000000Z-aaaa");
+    std::fs::create_dir_all(folder.join("closes")).unwrap();
+    std::fs::write(
+        folder.join("meta.json"),
+        json!({
+            "session_id": "20200101T000000Z-aaaa", "start": "2020-01-01T00:00:00Z", "end": null,
+            "seed": 1, "speed": 1.0, "git_commit": "abcdef1234", "dropped_records": 0
+        })
+        .to_string(),
+    )
+    .unwrap();
+    // The recorder writes the engine's own meta.json once it starts.
+    sleep(Duration::from_millis(300)).await;
+
+    let response = router.clone().oneshot(get("/api/sessions")).await.unwrap();
+    let list = json_body(response).await;
+    let rows = list.as_array().unwrap();
+    let running: Vec<_> = rows.iter().filter(|row| row["running"] == true).collect();
+    assert_eq!(running.len(), 1, "{rows:?}");
+    assert_ne!(running[0]["id"], "20200101T000000Z-aaaa");
+    let old = rows
+        .iter()
+        .find(|row| row["id"] == "20200101T000000Z-aaaa")
+        .unwrap();
+    assert_eq!(old["running"], false);
+
+    for (id, expected) in [
+        (running[0]["id"].as_str().unwrap(), true),
+        ("20200101T000000Z-aaaa", false),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(get(&format!("/api/sessions/{id}")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(json_body(response).await["running"], expected, "{id}");
+    }
+}

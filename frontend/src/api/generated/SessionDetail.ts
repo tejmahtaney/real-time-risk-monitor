@@ -2,4 +2,8 @@
 import type { DailyPnlRow } from "./DailyPnlRow";
 import type { SessionMeta } from "./SessionMeta";
 
-export type SessionDetail = { meta: SessionMeta, daily_pnl: Array<DailyPnlRow>, };
+export type SessionDetail = { meta: SessionMeta, daily_pnl: Array<DailyPnlRow>, 
+/**
+ * True when this is the engine's current session (see [`SessionSummary::running`]).
+ */
+running: boolean, };

@@ -293,6 +293,11 @@ async fn bad_uploads_are_rejected_with_the_line_number_and_nothing_is_saved() {
 
 // --- 6. The live engine keeps ticking while a backtest runs --------------------------------
 
+/// The shortest backtest that tests anything, and how many times the date count may double to
+/// reach it.
+const MIN_RUN: Duration = Duration::from_millis(300);
+const MAX_DOUBLINGS: u32 = 6;
+
 #[tokio::test(flavor = "current_thread")]
 async fn the_live_engine_keeps_ticking_while_a_backtest_runs() {
     let (_dir, storage) = support::temp_storage();
@@ -302,34 +307,47 @@ async fn the_live_engine_keeps_ticking_while_a_backtest_runs() {
 
     let (_bt_dir, config) = fixture(STOCK_AND_CALL, "");
     let manager = BacktestManager::new(config);
-    let id = manager
-        .create(
-            upload(&long_csv(&[("SPY", alternating(100.0, A, 160))])),
-            CreateOptions::default(),
-        )
-        .await
-        .unwrap()
-        .id;
-    let before = handle.latest().seq;
-    manager.control(&id, ControlCommand::RunToEnd).unwrap();
 
-    let started = Instant::now();
-    let mut last_seq = before;
-    let mut last_change = Instant::now();
-    let mut longest_gap = Duration::ZERO;
-    while manager.status(&id).unwrap().state == BacktestRunState::RunningToEnd {
-        tokio::time::sleep(Duration::from_millis(2)).await;
-        let seq = handle.latest().seq;
-        if seq != last_seq {
-            longest_gap = longest_gap.max(last_change.elapsed());
-            last_seq = seq;
-            last_change = Instant::now();
+    // A fast build can replay a fixed number of dates in well under the window this test
+    // needs, so it sizes itself: while a run finishes in under MIN_RUN, double the dates and
+    // try again, up to MAX_DOUBLINGS. That makes it hold in debug and release by construction.
+    let mut dates = 160;
+    let mut attempt = 0;
+    let (id, before, last_seq, elapsed, longest_gap) = loop {
+        let id = manager
+            .create(
+                upload(&long_csv(&[("SPY", alternating(100.0, A, dates))])),
+                CreateOptions::default(),
+            )
+            .await
+            .unwrap()
+            .id;
+        let before = handle.latest().seq;
+        manager.control(&id, ControlCommand::RunToEnd).unwrap();
+
+        let started = Instant::now();
+        let mut last_seq = before;
+        let mut last_change = Instant::now();
+        let mut longest_gap = Duration::ZERO;
+        while manager.status(&id).unwrap().state == BacktestRunState::RunningToEnd {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            let seq = handle.latest().seq;
+            if seq != last_seq {
+                longest_gap = longest_gap.max(last_change.elapsed());
+                last_seq = seq;
+                last_change = Instant::now();
+            }
         }
-    }
-    let elapsed = started.elapsed();
+        let elapsed = started.elapsed();
+        if elapsed >= MIN_RUN || attempt == MAX_DOUBLINGS {
+            break (id, before, last_seq, elapsed, longest_gap);
+        }
+        dates *= 2;
+        attempt += 1;
+    };
     assert!(
-        elapsed > Duration::from_millis(300),
-        "the backtest was too short to test anything: {elapsed:?}"
+        elapsed >= MIN_RUN,
+        "the backtest was too short to test anything even with {dates} dates: {elapsed:?}"
     );
     assert!(
         last_seq - before >= 10,

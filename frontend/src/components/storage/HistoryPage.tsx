@@ -77,7 +77,13 @@ export function HistoryPage(): ReactElement {
                       />
                     </td>
                     <td className="whitespace-nowrap px-2 py-1">{row.start}</td>
-                    <td className={`whitespace-nowrap px-2 py-1 ${row.cutShort ? 'text-warning' : ''}`}>{row.end}</td>
+                    <td className={`whitespace-nowrap px-2 py-1 ${row.cutShort ? 'text-warning' : ''}`}>
+                      {row.running ? (
+                        <span className="rounded bg-up/20 px-1.5 py-0.5 text-xs text-up">running</span>
+                      ) : (
+                        row.end
+                      )}
+                    </td>
                     <td className="px-2 py-1 text-right">{row.days}</td>
                     <td className="px-2 py-1 text-right">{row.size}</td>
                     <td className="px-2 py-1 font-mono text-xs">{row.commit}</td>

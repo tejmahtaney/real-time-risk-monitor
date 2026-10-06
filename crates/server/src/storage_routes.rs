@@ -95,6 +95,9 @@ struct SessionSummary {
     size_bytes: u64,
     git_commit: String,
     total_pnl: Option<f64>,
+    /// True when this is the engine's current session, so it has no end time yet because it
+    /// is still recording, not because it was cut short.
+    running: bool,
 }
 
 async fn list_sessions(
@@ -137,6 +140,7 @@ async fn list_sessions(
             size_bytes: engine::size_of(&dir)?,
             git_commit: meta.git_commit,
             total_pnl,
+            running: id == state.engine.session_id(),
         });
     }
     Ok(Json(out))
@@ -147,6 +151,8 @@ async fn list_sessions(
 struct SessionDetail {
     meta: SessionMeta,
     daily_pnl: Vec<DailyPnlRow>,
+    /// True when this is the engine's current session (see [`SessionSummary::running`]).
+    running: bool,
 }
 
 async fn session_detail(
@@ -156,7 +162,12 @@ async fn session_detail(
     safe_segment(&id)?;
     let (dir, meta) = load_session_meta(&state.storage_root, &id)?;
     let daily_pnl = read_daily_pnl_csv(&dir.join("daily-pnl.csv"));
-    Ok(Json(SessionDetail { meta, daily_pnl }))
+    let running = id == state.engine.session_id();
+    Ok(Json(SessionDetail {
+        meta,
+        daily_pnl,
+        running,
+    }))
 }
 
 /// A missing `daily-pnl.csv` (no session close yet) reads as an empty list, matching
