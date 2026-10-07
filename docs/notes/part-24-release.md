@@ -17,7 +17,7 @@ Phase A was the audit and the scripts. Phase B fixed what the controller's runs 
 - **`cargo deny`.** Advisories, licences and sources passed. Bans failed because the workspace crates count as public, so their path dependencies are wildcards. Fixed with `publish = false` on every workspace crate. The unused OpenSSL licence allowance is gone. `cargo audit` found no vulnerabilities, but `yoke-derive` 0.8.3 was yanked, so it is updated to 0.8.4.
 - **Release-mode tests.** 633 passed and 1 failed. The failing test asserted a backtest takes over 300 ms, and a release build replays it in about 115 ms. The test now doubles its date count until a run lasts at least 300 ms (up to six doublings), so it needs no tuning for any build.
 - **Running session.** History showed the live session as "cut short". The session list and detail now carry `running`, true when the id is the engine's current session. The badge says "running", and "cut short" is only for ended-without-end-time sessions.
-- **Demo.** The straddle defaults to 15 contracts a leg, so one or two limits breach rather than eight. The recording is about 90 seconds, each pause has its panel fully in view, and the GIF is 800 px, 6 fps and double speed with a 64-colour palette (the controller measured about 8.6 MB, down from 57 MB).
+- **Demo.** The straddle defaults to 15 contracts a leg, so one or two limits breach rather than eight. The recording is about 90 seconds, each pause has its panel fully in view, and the GIF is 720 px, 6 fps and double speed with a 64-colour palette (the controller measured about 8.6 MB, down from 57 MB).
 
 ## Measured numbers
 
@@ -55,7 +55,7 @@ The commands are in `crates/server/tests/soak.rs`: `cargo test --release -p serv
 
 ## Demo
 
-`make demo` needs the app running on a throwaway storage folder (`RRM_STORAGE_DIR=$(mktemp -d) cargo run -p server`, then `npm --prefix frontend run dev`) and ffmpeg. It records 1,440 × 900, writes `docs/demo.mp4` at full speed and `docs/demo.gif` at 800 px, 6 fps and double speed. A step that cannot find its element is logged and skipped, so check the video. If the straddle breaches nothing, raise `RRM_DEMO_QUANTITY` above its default of 15.
+`make demo` needs the app running on a throwaway storage folder (`RRM_STORAGE_DIR=$(mktemp -d) cargo run -p server`, then `npm --prefix frontend run dev`) and ffmpeg. It records 1,440 × 900, writes `docs/demo.mp4` at full speed and `docs/demo.gif` at 720 px, 6 fps and double speed. A step that cannot find its element is logged and skipped, so check the video. If the straddle breaches nothing, raise `RRM_DEMO_QUANTITY` above its default of 15.
 
 ## 30-second pitch
 

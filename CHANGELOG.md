@@ -34,6 +34,6 @@ The first complete version. Each line names the part and the tag that holds it (
   - History badges the session the engine is recording as "running". "Cut short" is kept for sessions that ended without an end time. `GET /api/sessions` and `/api/sessions/{id}` gained a `running` field.
   - `cargo deny` passes: every workspace crate is `publish = false`, the unused OpenSSL licence is gone and yanked `yoke-derive` is updated to 0.8.4.
   - The live-engine-while-backtesting test sizes itself, so it holds in debug and release builds.
-  - Ignored soak tests (`crates/server/tests/soak.rs`), `deny.toml`, `scripts/measure-compute.sh` and the demo recorder (`make demo`, a GIF at 800 px and an MP4 at 1,440 px).
+  - Ignored soak tests (`crates/server/tests/soak.rs`), `deny.toml`, `scripts/measure-compute.sh` and the demo recorder (`make demo`, a GIF at 720 px and an MP4 at 1,440 px).
   - README: measured performance (whole tick median 468 µs, VaR throttled to every second tick), soak results, storage growth of 10.2 MiB per hour, and the rate described as hand-entered.
   - Known issue: a backtest replay step takes about 29 ms because the VaR window change redraws the Monte Carlo scenarios.

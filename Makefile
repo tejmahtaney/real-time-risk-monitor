@@ -98,7 +98,7 @@ hooks:
 
 # Records the scripted demo and converts it. Needs the app already running (`make dev`) on a
 # throwaway storage folder, plus ffmpeg. The WebM is a temporary file; the outputs are
-# docs/demo.gif (800 px wide, 6 fps, double speed, a 64-colour palette, no dithering, about
+# docs/demo.gif (720 px wide, 6 fps, double speed, a 64-colour palette, no dithering, about
 # 9 MB) and docs/demo.mp4 (1440 px, full speed). If the GIF is over 10 MB, lower the width
 # in the scale filter below.
 demo:
@@ -106,9 +106,9 @@ demo:
 	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
 	RRM_DEMO_OUT="$$tmp/demo.webm" npm --prefix frontend run demo && \
 	ffmpeg -y -loglevel error -i "$$tmp/demo.webm" \
-		-vf "setpts=PTS/2,fps=6,scale=800:-1:flags=lanczos,palettegen=max_colors=64" "$$tmp/palette.png" && \
+		-vf "setpts=PTS/2,fps=6,scale=720:-1:flags=lanczos,palettegen=max_colors=64" "$$tmp/palette.png" && \
 	ffmpeg -y -loglevel error -i "$$tmp/demo.webm" -i "$$tmp/palette.png" \
-		-lavfi "setpts=PTS/2,fps=6,scale=800:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=none:diff_mode=rectangle" docs/demo.gif && \
+		-lavfi "setpts=PTS/2,fps=6,scale=720:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=none:diff_mode=rectangle" docs/demo.gif && \
 	ffmpeg -y -loglevel error -i "$$tmp/demo.webm" -vf "scale=1440:-2,format=yuv420p" \
 		-c:v libx264 -crf 23 -movflags +faststart docs/demo.mp4 && \
 	ls -lh docs/demo.gif docs/demo.mp4 && \
