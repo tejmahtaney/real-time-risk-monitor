@@ -2,7 +2,7 @@
 
 ## [1.0.0] - 2026-10-06
 
-The first complete version. Each line names the part and the tag that holds it (`git show part-NN`). Part names follow the notes in `docs/notes/`.
+The first complete version. Each line names the part and the tag that holds it (`git show part-NN`).
 
 - **Part 01, `part-01`.** Cargo workspace scaffold, Makefile, CI-style checks.
 - **Part 02, `part-02`.** Black-Scholes-Merton pricing with a tail-safe normal CDF.

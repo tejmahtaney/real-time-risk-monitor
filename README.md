@@ -2,10 +2,6 @@
 
 A real-time risk monitor for an options book. A Rust backend prices European options with Black-Scholes-Merton, computes Greeks on a live price feed, adds up the risk across the book, splits each tick's P&L into its causes, and raises alerts when a limit is crossed. A React dashboard shows it all live. The simulated prices are seeded from real market data, and everything the app produces is saved to a local folder for later review. It runs on your own machine and talks to nothing but the Alpha Vantage API.
 
-![Demo](docs/demo.gif)
-
-The same walk-through at full speed and 1,440 px: [docs/demo.mp4](docs/demo.mp4).
-
 ![The live dashboard](docs/screenshots/dashboard-1920.png)
 
 ## Features
@@ -445,7 +441,7 @@ git checkout main             # come back
 make snapshot                 # compressed copy of HEAD in ../snapshots/
 ```
 
-`make snapshot` refuses to run on a dirty tree, so every archive in `../snapshots/` matches a commit. The build plan is in [docs/ROADMAP.md](docs/ROADMAP.md), the log in [docs/PROGRESS.md](docs/PROGRESS.md) and the per-part maths and design notes in [docs/notes/](docs/notes/).
+`make snapshot` refuses to run on a dirty tree, so every archive in `../snapshots/` matches a commit.
 
 ## Data
 
