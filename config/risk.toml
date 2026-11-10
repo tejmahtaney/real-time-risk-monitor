@@ -3,5 +3,4 @@
 # config/limits.toml's var_99 limit. One of "delta_normal", "delta_gamma_mc",
 # "historical". delta_gamma_mc is the default: the only one of the three that prices
 # both delta and gamma risk without depending on a single 99-point historical window.
-# See docs/notes/part-18-var.md for how the three methods compare.
 headline_var_method = "delta_gamma_mc"

@@ -2,7 +2,7 @@
 
 Options portfolio risk monitor. A Rust backend prices European options with Black-Scholes-Merton, computes Greeks on a live price feed, aggregates risk across the book, attributes P&L and raises limit alerts. A React dashboard shows it live. Everything the app produces is saved to a local storage folder.
 
-The project is built in numbered parts listed in docs/ROADMAP.md. Only do the work of the part you are given. If you find a problem that belongs to a later part, add it to "Open issues" in docs/PROGRESS.md instead of fixing it.
+The project was built in numbered parts. Only do the work you are given. If you find a problem outside that scope, report it instead of fixing it.
 
 ## Local only
 
@@ -60,7 +60,7 @@ Dependency direction. `pricing` has no internal deps. `domain` uses `pricing`. `
 - File writes never block the engine tick. JSON files are written to a temp file and renamed. Logs are append-only.
 - Unit tests sit next to the code in `#[cfg(test)] mod tests`. Cross-crate and HTTP tests go in `tests/`.
 - Log with `tracing`. No `println!` outside examples and scripts.
-- Add a dependency only with a reason and record it in docs/PROGRESS.md.
+- Add a dependency only with a reason.
 - Every public item has a doc comment. Pricing functions state their formula in the doc comment.
 - British spelling in docs, comments and UI text. Identifiers follow normal Rust and TypeScript naming.
 
@@ -89,9 +89,7 @@ Run these in order at the end of every part.
 3. `cargo test --workspace`
 4. If `frontend/` exists, run `npm run lint`, `npm run typecheck`, `npm test -- --run` and `npm run build` inside it.
 5. Fix every failure. Never skip, weaken or delete a test to make it pass. Never add `#[allow]` without a comment that says why.
-6. Append to docs/PROGRESS.md the part number, what was built, new dependencies, test count and open issues.
-7. Write docs/notes/part-NN-<slug>.md in under one page. Cover the key maths, the main design choices with reasons, and up to three questions an interviewer might ask about this part with short answers.
-8. Commit everything with the message `Part NN: <short summary>`.
-9. Tag the commit `part-NN`. If the tag exists because the part was re-run, use `part-NN-r2`, `part-NN-r3` and so on. Never move an existing tag.
-10. Run `make snapshot`.
-11. Reply with a short summary of what changed, the test count, the tag, and anything I must do by hand.
+6. Commit everything with the message `Part NN: <short summary>`.
+7. Tag the commit `part-NN`. If the tag exists because the part was re-run, use `part-NN-r2`, `part-NN-r3` and so on. Never move an existing tag.
+8. Run `make snapshot`.
+9. Reply with a short summary of what changed, the test count, the tag, and anything I must do by hand.

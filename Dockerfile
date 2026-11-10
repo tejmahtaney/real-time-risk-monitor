@@ -1,5 +1,4 @@
 # Multi-stage build for the `risk-monitor` binary and the frontend it serves.
-# See docs/notes/part-17-docker-local.md for why each stage looks the way it does.
 
 # --- Stage 1: frontend -------------------------------------------------------------
 FROM node:lts-alpine AS frontend

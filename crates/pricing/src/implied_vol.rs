@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn grid_needs_few_iterations() {
-        // Measured on this grid: mean 8.64, maximum 33 (see docs/notes/part-04-implied-vol.md).
+        // Measured on this grid: mean 8.64, maximum 33.
         let (mean, max) = grid_iteration_stats();
         assert!(max <= 64, "max {max}");
         assert!(mean < 12.0, "mean {mean}");

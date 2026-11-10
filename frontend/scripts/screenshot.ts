@@ -3,7 +3,7 @@
  * 1,920 pixels wide into `docs/screenshots/`, then starts a backtest on the archived
  * history, runs it to the end and saves the results view as `backtest-results-<width>.png`, then saves
  * the storage pages (`history-`, `session-detail-`, `portfolios-`, `data-` and `backtest-compare-<width>.png`),
- * for visually checking a part's work against `docs/ROADMAP.md`'s feature list. The demo recording
+ * for visually checking a part's work against the feature list. The demo recording
  * (`record-demo.ts`) follows the same patterns and takes no part-specific arguments either.
  *
  * Requires both halves of the app already running (`make dev`, or

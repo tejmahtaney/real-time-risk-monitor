@@ -72,26 +72,26 @@ The recorder task is the only place in the engine crate that touches disk. It wr
 - Failures are contained at the smallest scope: one position becomes an error row, one symbol's feed fault freezes prices not time, one unreadable old session is skipped in a list.
 - API errors are `{"error":{"code":...,"message":...}}` with a matching HTTP status.
 
-## Where each part's decisions live
+## Where each part lives
 
-| Part | Topic | Code | Note |
-|---|---|---|---|
-| 1 | Workspace, lints | `Cargo.toml`, `clippy.toml` | `docs/notes/part-01-workspace.md` |
-| 2–4 | BSM, Greeks, implied vol | `crates/pricing` | parts 02, 03, 04 |
-| 5 | Domain types, position book | `crates/domain`, `crates/portfolio` | part 05 |
-| 6 | Aggregation | `crates/risk/src/aggregate.rs` | part 06 |
-| 7 | Market data, calibration | `crates/marketdata` | part 07 |
-| 8 | Simulator and clock | `crates/marketdata/src/simulator.rs`, `clock.rs` | part 08 |
-| 9 | P&L attribution | `crates/risk/src/attributor.rs`, `pnl.rs` | part 09 |
-| 10 | Limits and alerts | `crates/risk/src/monitor.rs`, `limits.rs`, `config/limits.toml` | part 10 |
-| 11 | Engine and REST | `crates/engine`, `crates/server/src/routes.rs` | part 11 |
-| 12 | WebSocket | `crates/server/src/ws.rs` | part 12 |
-| 13 | Storage and recording | `crates/storage`, `crates/engine/src/recorder.rs` | part 13 |
-| 14–16 | Frontend | `frontend/src` | parts 14, 15, 16 |
-| 17 | Docker | `Dockerfile`, `docker-compose.yml` | part 17 |
-| 18 | VaR | `crates/risk/src/var` | part 18 |
-| 19 | Splits and dividends | `crates/portfolio/src/split.rs`, `crates/engine/src/corporate.rs` | part 19 |
-| 20 | Backtester | `crates/engine/src/backtest`, `crates/risk/src/backtest.rs` | part 20 |
-| 21 | Backtester UI | `frontend/src/components/backtest` | part 21 |
-| 22 | Storage browser | `crates/server/src/storage_routes.rs`, `frontend/src/components/storage` | part 22 |
-| 23 | Documentation | `README.md`, this file | part 23 |
+| Part | Topic | Code |
+|---|---|---|
+| 1 | Workspace, lints | `Cargo.toml`, `clippy.toml` |
+| 2–4 | BSM, Greeks, implied vol | `crates/pricing` |
+| 5 | Domain types, position book | `crates/domain`, `crates/portfolio` |
+| 6 | Aggregation | `crates/risk/src/aggregate.rs` |
+| 7 | Market data, calibration | `crates/marketdata` |
+| 8 | Simulator and clock | `crates/marketdata/src/simulator.rs`, `clock.rs` |
+| 9 | P&L attribution | `crates/risk/src/attributor.rs`, `pnl.rs` |
+| 10 | Limits and alerts | `crates/risk/src/monitor.rs`, `limits.rs`, `config/limits.toml` |
+| 11 | Engine and REST | `crates/engine`, `crates/server/src/routes.rs` |
+| 12 | WebSocket | `crates/server/src/ws.rs` |
+| 13 | Storage and recording | `crates/storage`, `crates/engine/src/recorder.rs` |
+| 14–16 | Frontend | `frontend/src` |
+| 17 | Docker | `Dockerfile`, `docker-compose.yml` |
+| 18 | VaR | `crates/risk/src/var` |
+| 19 | Splits and dividends | `crates/portfolio/src/split.rs`, `crates/engine/src/corporate.rs` |
+| 20 | Backtester | `crates/engine/src/backtest`, `crates/risk/src/backtest.rs` |
+| 21 | Backtester UI | `frontend/src/components/backtest` |
+| 22 | Storage browser | `crates/server/src/storage_routes.rs`, `frontend/src/components/storage` |
+| 23 | Documentation | `README.md`, this file |

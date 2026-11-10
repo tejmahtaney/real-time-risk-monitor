@@ -6,7 +6,7 @@
  * An 8-hue categorical palette, fixed order, validated against this app's dark
  * surface (`--color-surface`, `#111827`) with the dataviz skill's validator
  * (lightness band, chroma floor, CVD separation, normal-vision floor and contrast
- * all pass on the adjacent pairlist; see docs/notes/part-16-charts.md). The five
+ * all pass on the adjacent pairlist). The five
  * symbols `config/market.toml` actually calibrates get their own fixed slots so the
  * demo book never collides; any other symbol (added through the positions form)
  * falls back to a deterministic hash into the three remaining slots.

@@ -88,7 +88,7 @@ const MIN_HALF_SPAN = 1
  * the axis out to. Past this, drawing the line/band would flatten the chart the
  * same way anchoring the whole axis at the limit always did — this book's limits
  * are tuned to sit only 30–50% above the data's own observed peak in ordinary
- * conditions (see docs/PROGRESS.md's Part 10 notes), so 1.5× only excludes a limit
+ * conditions, so 1.5× only excludes a limit
  * that is genuinely far from what the chart is actually showing. */
 const LIMIT_VISIBILITY_FACTOR = 1.5
 

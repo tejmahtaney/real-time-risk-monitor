@@ -7,8 +7,7 @@
 //! ```
 //!
 //! `max_speed_ten_minutes_twenty_clients` takes about 10 minutes and
-//! `default_speed_never_drops_records` about 2. Each prints its measurements, which the
-//! notes in `docs/notes/part-24-release.md` quote.
+//! `default_speed_never_drops_records` about 2. Each prints its measurements.
 #![allow(clippy::unwrap_used)]
 
 use std::path::Path;

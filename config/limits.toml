@@ -1,8 +1,7 @@
 # Risk limits (Part 10). Utilisation = |value| / limit, except the theta floor, which
 # compares against the day's decay cost, max(0, -theta). Tuned by
 # `cargo run -p engine --example tune_limits` against 10 headless sessions of seed 42
-# over the sample portfolio; see docs/PROGRESS.md Part 10 for the distributions and the
-# reasoning behind these numbers.
+# over the sample portfolio.
 
 # Utilisation at or above this fraction of a limit is a warning.
 warning_threshold = 0.8
